@@ -13,7 +13,7 @@ var tieCmd = &cobra.Command{
 	Use:   "tie [package...]",
 	Short: "Create symlinks for one or more packages",
 	Long: `Tie creates symlinks for the specified packages.
-Use --all to tie all packages defined in knot.yml.`,
+Use --all to tie all packages defined in Knotfile.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if !tieAll && len(args) == 0 {
 			return fmt.Errorf("specify at least one package or use --all")
