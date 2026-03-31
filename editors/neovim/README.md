@@ -5,6 +5,7 @@ Neovim plugin for the [knot](https://github.com/oxgrad/knot) dotfiles manager.
 ## Features
 
 - Automatic filetype detection for files named exactly `Knotfile`
+- 🪢 Devicon registration for [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) (shown in statuslines, file trees, tablines)
 - YAML-based syntax highlighting with Knotfile-specific keyword groups:
   - `packages` — highlighted as a structure keyword
   - `source`, `target`, `ignore`, `condition` — highlighted as identifiers

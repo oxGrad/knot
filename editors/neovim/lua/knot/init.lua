@@ -18,6 +18,21 @@ local defaults = {
   auto_configure_yamlls = true,
 }
 
+--- Register the 🪢 icon with nvim-web-devicons for the knotfile filetype.
+--- Called automatically from setup(); safe to call if devicons is not installed.
+function M._register_devicon()
+  local ok, devicons = pcall(require, "nvim-web-devicons")
+  if not ok then return end
+  devicons.set_icon({
+    knotfile = {
+      icon  = "🪢",
+      color = "#a78bfa",   -- soft violet — rope-like
+      cterm_color = "141",
+      name  = "Knotfile",
+    },
+  })
+end
+
 --- Set up the plugin.
 ---@param opts table|nil  Optional overrides for the default config table.
 function M.setup(opts)
@@ -31,7 +46,10 @@ function M.setup(opts)
     },
   })
 
-  -- 2. Override treesitter parser to "yaml" for knotfile buffers so that
+  -- 2. Register the 🪢 devicon (no-op if nvim-web-devicons is not installed).
+  M._register_devicon()
+
+  -- 3. Override treesitter parser to "yaml" for knotfile buffers so that
   --    tree-sitter-yaml highlighting and text-objects work out of the box.
   vim.api.nvim_create_autocmd("FileType", {
     pattern = "knotfile",
@@ -47,7 +65,7 @@ function M.setup(opts)
     end,
   })
 
-  -- 3. Optionally configure yamlls schema at runtime.
+  -- 4. Optionally configure yamlls schema at runtime.
   if cfg.auto_configure_yamlls then
     M._configure_yamlls()
   end
