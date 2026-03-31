@@ -25,7 +25,7 @@ packages:
       os: darwin
 `
 	dir := t.TempDir()
-	path := filepath.Join(dir, "knot.yml")
+	path := filepath.Join(dir, "Knotfile")
 	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ packages:
 
 func TestLoad_EmptyPackages(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "knot.yml")
+	path := filepath.Join(dir, "Knotfile")
 	if err := os.WriteFile(path, []byte("packages:\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 
 func TestLoad_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "knot.yml")
+	path := filepath.Join(dir, "Knotfile")
 	if err := os.WriteFile(path, []byte("{{invalid yaml}}"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +114,8 @@ func TestFindConfigFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Place knot.yml in root
-	knotPath := filepath.Join(root, "knot.yml")
+	// Place Knotfile in root
+	knotPath := filepath.Join(root, "Knotfile")
 	if err := os.WriteFile(knotPath, []byte("packages:\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestFindConfigFile_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	_, err := FindConfigFile(dir)
 	if err == nil {
-		t.Error("expected error when knot.yml not found")
+		t.Error("expected error when Knotfile not found")
 	}
 }
 
@@ -151,7 +151,7 @@ func TestLoad_AbsoluteSourcePath(t *testing.T) {
 	dir := t.TempDir()
 	absSource := "/usr/local/share/dotfiles/nvim"
 	yml := "packages:\n  nvim:\n    source: " + absSource + "\n    target: ~/.config/nvim\n"
-	path := filepath.Join(dir, "knot.yml")
+	path := filepath.Join(dir, "Knotfile")
 	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestLoad_AbsoluteSourcePath(t *testing.T) {
 func TestLoad_AbsentCondition(t *testing.T) {
 	dir := t.TempDir()
 	yml := "packages:\n  zsh:\n    source: ./zsh\n    target: ~/\n"
-	path := filepath.Join(dir, "knot.yml")
+	path := filepath.Join(dir, "Knotfile")
 	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestLoad_AbsentCondition(t *testing.T) {
 func TestFindConfigFile_RelativePath(t *testing.T) {
 	// Change into a temp directory so a relative path resolution is meaningful.
 	root := t.TempDir()
-	knotPath := filepath.Join(root, "knot.yml")
+	knotPath := filepath.Join(root, "Knotfile")
 	if err := os.WriteFile(knotPath, []byte("packages:\n"), 0644); err != nil {
 		t.Fatal(err)
 	}

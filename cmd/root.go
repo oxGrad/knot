@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 	Use:   "knot",
 	Short: "A lightweight, configurable dotfiles manager",
 	Long: `Knot manages your dotfiles via symlinks.
-It reads a knot.yml config file and creates or removes symlinks
+It reads a Knotfile and creates or removes symlinks
 based on your package definitions.`,
 }
 
@@ -30,11 +30,11 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to knot.yml (default: auto-discover)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to Knotfile (default: auto-discover)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "print actions without executing them")
 }
 
-// loadConfig finds and parses the knot.yml config file.
+// loadConfig finds and parses the Knotfile.
 func loadConfig() (*config.Config, string, error) {
 	if cfgFile != "" {
 		cfg, err := config.Load(cfgFile)

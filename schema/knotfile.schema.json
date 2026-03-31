@@ -1,0 +1,60 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json",
+  "title": "Knotfile",
+  "description": "Configuration schema for the knot dotfiles manager (https://github.com/oxgrad/knot). Place this file named exactly 'Knotfile' at the root of your dotfiles repository.",
+  "type": "object",
+  "required": ["packages"],
+  "additionalProperties": false,
+  "properties": {
+    "packages": {
+      "type": "object",
+      "description": "A map of named package definitions. Each key is a logical name for a dotfile bundle (e.g. 'nvim', 'zsh').",
+      "additionalProperties": {
+        "$ref": "#/definitions/package"
+      }
+    }
+  },
+  "definitions": {
+    "package": {
+      "type": "object",
+      "description": "A dotfile package: a source directory whose files are symlinked into a target directory.",
+      "required": ["source", "target"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Path to the source directory containing dotfiles. Relative paths are resolved from the Knotfile's directory. Supports ~ expansion (e.g. ~/dotfiles/nvim)."
+        },
+        "target": {
+          "type": "string",
+          "description": "Destination directory where symlinks will be created. Supports ~ expansion (e.g. ~/.config/nvim)."
+        },
+        "ignore": {
+          "type": "array",
+          "description": "List of glob patterns (matched against file basenames only) to exclude from symlinking.",
+          "items": {
+            "type": "string",
+            "description": "A glob pattern as understood by Go's filepath.Match (e.g. '*.md', '.DS_Store', 'LICENSE')."
+          },
+          "uniqueItems": true
+        },
+        "condition": {
+          "$ref": "#/definitions/condition"
+        }
+      }
+    },
+    "condition": {
+      "type": "object",
+      "description": "An optional condition that gates whether this package is applied on the current system.",
+      "additionalProperties": false,
+      "properties": {
+        "os": {
+          "type": "string",
+          "description": "Only apply this package on the given operating system. The value is compared against Go's runtime.GOOS.",
+          "enum": ["darwin", "linux", "windows", "freebsd"]
+        }
+      }
+    }
+  }
+}
