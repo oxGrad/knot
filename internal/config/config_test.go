@@ -146,3 +146,60 @@ func TestFindConfigFile_NotFound(t *testing.T) {
 		t.Error("expected error when knot.yml not found")
 	}
 }
+
+func TestLoad_AbsoluteSourcePath(t *testing.T) {
+	dir := t.TempDir()
+	absSource := "/usr/local/share/dotfiles/nvim"
+	yml := "packages:\n  nvim:\n    source: " + absSource + "\n    target: ~/.config/nvim\n"
+	path := filepath.Join(dir, "knot.yml")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	// Absolute source paths must not be modified.
+	if cfg.Packages["nvim"].Source != absSource {
+		t.Errorf("source = %q, want %q (absolute path should be unchanged)", cfg.Packages["nvim"].Source, absSource)
+	}
+}
+
+func TestLoad_AbsentCondition(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  zsh:\n    source: ./zsh\n    target: ~/\n"
+	path := filepath.Join(dir, "knot.yml")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if cfg.Packages["zsh"].Condition != nil {
+		t.Error("expected Condition to be nil when not specified in YAML")
+	}
+}
+
+func TestFindConfigFile_RelativePath(t *testing.T) {
+	// Change into a temp directory so a relative path resolution is meaningful.
+	root := t.TempDir()
+	knotPath := filepath.Join(root, "knot.yml")
+	if err := os.WriteFile(knotPath, []byte("packages:\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := FindConfigFile(root)
+	if err != nil {
+		t.Fatalf("FindConfigFile() error: %v", err)
+	}
+	// Result must be absolute regardless of how startDir was provided.
+	if !filepath.IsAbs(found) {
+		t.Errorf("FindConfigFile() returned non-absolute path %q", found)
+	}
+	if found != knotPath {
+		t.Errorf("found = %q, want %q", found, knotPath)
+	}
+}

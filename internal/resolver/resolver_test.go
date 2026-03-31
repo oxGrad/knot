@@ -82,3 +82,39 @@ func TestShouldIgnore(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldIgnore_InvalidPattern(t *testing.T) {
+	// filepath.Match returns ErrBadPattern for malformed patterns; ShouldIgnore must propagate it.
+	_, err := ShouldIgnore("file.txt", []string{"[invalid"})
+	if err == nil {
+		t.Error("expected error for invalid glob pattern")
+	}
+}
+
+func TestShouldIgnore_EmptyFilename(t *testing.T) {
+	got, err := ShouldIgnore("", []string{"*.md", "README.md"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("empty filename should not match any pattern")
+	}
+}
+
+func TestExpandPath_TildeNotAtStart(t *testing.T) {
+	home := "/home/testuser"
+	// A tilde that is not the leading character must be left unchanged.
+	tests := []struct {
+		input string
+	}{
+		{"/home/~user"},
+		{"/path/to/~/file"},
+		{"no-tilde-at-all"},
+	}
+	for _, tt := range tests {
+		got := ExpandPath(tt.input, home)
+		if got != tt.input {
+			t.Errorf("ExpandPath(%q, %q) = %q, want unchanged %q", tt.input, home, got, tt.input)
+		}
+	}
+}
