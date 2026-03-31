@@ -27,23 +27,32 @@ Neovim plugin for the [knot](https://github.com/oxgrad/knot) dotfiles manager.
 
 ```lua
 {
-  -- Local path (from inside the knot repo):
+  -- Path to the neovim plugin directory inside the knot repo:
   dir = vim.fn.expand("~/path/to/knot/editors/neovim"),
-  -- Or, once published as a standalone plugin:
+  -- Once published as a standalone plugin, replace dir with:
   -- "oxgrad/knot.nvim",
-  ft = "knotfile",
+  name = "knot.nvim", -- registers the plugin under this name in lazy's registry
+  main = "knot",      -- tells lazy.nvim to call require("knot").setup(opts)
+  ft   = "knotfile",
   opts = {
     auto_configure_yamlls = true,
   },
 },
 ```
 
+> **Why `main = "knot"`?**  Without it, lazy.nvim derives the module name from the
+> directory name (`neovim`) and calls `require("neovim").setup(opts)`, which fails.
+
 ### packer.nvim
 
 ```lua
 use {
-  "~/path/to/knot/editors/neovim",
-  -- Or: "oxgrad/knot.nvim",
+  -- Path to the neovim plugin directory inside the knot repo
+  -- (packer does not expand ~, so vim.fn.expand is required):
+  vim.fn.expand("~/path/to/knot/editors/neovim"),
+  -- Once published as a standalone plugin, replace with:
+  -- "oxgrad/knot.nvim",
+  ft = { "knotfile" },
   config = function()
     require("knot").setup({
       auto_configure_yamlls = true,
