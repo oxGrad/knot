@@ -216,7 +216,7 @@ func (l *Linker) Apply(actions []LinkAction) error {
 		switch a.Op {
 		case OpCreate:
 			if l.DryRun {
-				fmt.Fprintf(l.Writer, "[dry-run] create %s -> %s\n", a.Target, a.Source)
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] create %s -> %s\n", a.Target, a.Source)
 				continue
 			}
 			if err := os.MkdirAll(filepath.Dir(a.Target), 0755); err != nil {
@@ -227,11 +227,11 @@ func (l *Linker) Apply(actions []LinkAction) error {
 				errs = append(errs, fmt.Errorf("symlink %q -> %q: %w", a.Target, a.Source, err))
 				continue
 			}
-			fmt.Fprintf(l.Writer, "linked   %s -> %s\n", a.Target, a.Source)
+			_, _ = fmt.Fprintf(l.Writer, "linked   %s -> %s\n", a.Target, a.Source)
 
 		case OpRemove:
 			if l.DryRun {
-				fmt.Fprintf(l.Writer, "[dry-run] remove %s\n", a.Target)
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] remove %s\n", a.Target)
 				continue
 			}
 			if err := os.Remove(a.Target); err != nil {

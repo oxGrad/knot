@@ -46,7 +46,7 @@ func scaffoldKnotfile(dir string) error {
 	knotfilePath := fmt.Sprintf("%s/%s", dir, config.KnotfileName)
 
 	if _, err := os.Stat(knotfilePath); err == nil {
-		return fmt.Errorf("Knotfile already exists at %s\nUse --config to specify a different path, or edit it directly", knotfilePath)
+		return fmt.Errorf("knotfile already exists at %s\nuse --config to specify a different path, or edit it directly", knotfilePath)
 	}
 
 	if err := os.MkdirAll(dir, 0755); err != nil {
