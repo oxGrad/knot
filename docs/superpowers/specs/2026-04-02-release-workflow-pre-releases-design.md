@@ -34,19 +34,23 @@ Note: `github.event.base_ref` is populated when a tag is pushed, indicating the 
 
 
 ### 2. GoReleaser Configuration (`.goreleaser.yaml`)
+We will transition from the deprecated `brews` section to `homebrew_casks` and split the configuration into two entries using conditional logic based on whether the current tag is a pre-release (`.Prerelease`).
 
-We will split the `brews` configuration into two entries using conditional logic based on whether the current tag is a pre-release (`.Prerelease`).
-
-#### Stable Formula (`knot.rb`)
-
+#### Stable Cask (`knot`)
 - **Name:** `knot`
 - **Skip Upload:** `{{ .Prerelease }}` (True if the tag has a suffix)
 
-#### Nightly Formula (`knot-nightly.rb`)
-
+#### Nightly Cask (`knot-nightly`)
 - **Name:** `knot-nightly`
 - **Skip Upload:** `{{ not .Prerelease }}` (True if the tag is stable)
-- **Repo/Token:** Same as the stable formula.
+- **Repo/Token:** Same as the stable cask.
+
+#### Migration to `homebrew_casks`:
+- Rename `brews:` to `homebrew_casks:`.
+- Ensure the `repository` points to your existing tap.
+- Use the `url` field or let GoReleaser handle the binary download link (default behavior for casks).
+- Note: Casks are now the preferred way to distribute binaries in GoReleaser v2, replacing Formulas.
+
 
 ### 3. GitHub Release Behavior
 
