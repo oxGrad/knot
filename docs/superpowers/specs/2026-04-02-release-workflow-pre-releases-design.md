@@ -1,12 +1,12 @@
-# Design Spec: Enhanced Release Workflow for Pre-releases
+# Design Spec: Enhanced Release Workflow for Nightly Builds
 
-This document outlines the changes to `knot`'s release process to support release candidates (RC), beta versions, and nightly builds without marking them as the "Latest" release on GitHub or Homebrew.
+This document outlines the changes to `knot`'s release process to support nightly builds without marking them as the "Latest" release on GitHub or Homebrew.
 
 ## Goals
-- Support tags with suffixes (e.g., `v1.0.0-rc.1`, `v1.0.0-nightly.20240115`).
-- Ensure pre-releases are not marked as "Latest" on GitHub.
+- Support tags with suffixes (e.g., `v1.0.0-nightly.20240115`).
+- Ensure nightly builds are not marked as "Latest" on GitHub.
 - Maintain a stable `knot` Homebrew formula (`brew install knot`).
-- Provide a `knot-nightly` Homebrew formula (`brew install knot-nightly`) that specifically tracks pre-releases.
+- Provide a `knot-nightly` Homebrew formula (`brew install knot-nightly`) that specifically tracks nightly builds.
 
 ## Proposed Changes
 
@@ -18,7 +18,7 @@ on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"   # Matches stable: v1.0.0
-      - "v[0-9]*.[0-9]*.[0-9]*-*" # Matches pre-release: v1.0.0-nightly.20240115
+      - "v[0-9]*.[0-9]*.[0-9]*-*" # Matches nightly: v1.0.0-nightly.20240115
 ```
 
 ### 2. GoReleaser Configuration (`.goreleaser.yaml`)
@@ -34,7 +34,8 @@ We will split the `brews` configuration into two entries using conditional logic
 - **Repo/Token:** Same as the stable formula.
 
 ### 3. GitHub Release Behavior
-GoReleaser automatically detects semantic versioning suffixes (like `-rc.1` or `-nightly.20240115`) and sets the `prerelease` flag to `true` on the GitHub Release. This prevents it from being marked as "Latest."
+GoReleaser automatically detects semantic versioning suffixes (like `-nightly.20240115`) and sets the `prerelease` flag to `true` on the GitHub Release. This prevents it from being marked as "Latest."
+
 
 ## Testing Strategy
 - **Manual Verification:** Review the generated GoReleaser configuration for syntax errors.
