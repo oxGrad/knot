@@ -1,0 +1,31 @@
+# Knotfile — knot dotfiles manager configuration
+#
+# Each entry under `packages` defines a dotfile bundle to manage.
+# Run `knot tie --all` to create all symlinks.
+# Run `knot status` to see what would change.
+#
+# Full reference: https://github.com/oxgrad/knot
+
+packages:
+
+  # Neovim configuration
+  nvim:
+    source: ./nvim                # relative to this Knotfile
+    target: ~/.config/nvim
+    ignore:
+      - "*.log"
+      - ".DS_Store"
+
+  # Zsh configuration
+  zsh:
+    source: ./zsh
+    target: ~/
+    ignore:
+      - "README.md"
+
+  # macOS-only: yabai window manager
+  yabai:
+    source: ./yabai
+    target: ~/.config/yabai
+    condition:
+      os: darwin                  # darwin | linux | windows | freebsd

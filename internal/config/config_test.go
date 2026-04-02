@@ -183,6 +183,41 @@ func TestLoad_AbsentCondition(t *testing.T) {
 	}
 }
 
+func TestDefaultDir_NoEnv(t *testing.T) {
+	t.Setenv(EnvKnotDir, "")
+	got := DefaultDir("/home/testuser")
+	want := "/home/testuser/.dotfiles"
+	if got != want {
+		t.Errorf("DefaultDir() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDir_WithEnv(t *testing.T) {
+	t.Setenv(EnvKnotDir, "/custom/dotfiles")
+	got := DefaultDir("/home/testuser")
+	if got != "/custom/dotfiles" {
+		t.Errorf("DefaultDir() = %q, want %q", got, "/custom/dotfiles")
+	}
+}
+
+func TestDefaultKnotfilePath(t *testing.T) {
+	t.Setenv(EnvKnotDir, "")
+	got := DefaultKnotfilePath("/home/testuser")
+	want := "/home/testuser/.dotfiles/Knotfile"
+	if got != want {
+		t.Errorf("DefaultKnotfilePath() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultKnotfilePath_WithEnv(t *testing.T) {
+	t.Setenv(EnvKnotDir, "/custom/dotfiles")
+	got := DefaultKnotfilePath("/home/testuser")
+	want := "/custom/dotfiles/Knotfile"
+	if got != want {
+		t.Errorf("DefaultKnotfilePath() = %q, want %q", got, want)
+	}
+}
+
 func TestFindConfigFile_RelativePath(t *testing.T) {
 	// Change into a temp directory so a relative path resolution is meaningful.
 	root := t.TempDir()

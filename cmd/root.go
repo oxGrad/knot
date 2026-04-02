@@ -30,7 +30,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to Knotfile (default: auto-discover)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to Knotfile (default: $HOME/.dotfiles/Knotfile, override via KNOT_DIR)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "print actions without executing them")
 }
 
@@ -41,16 +41,12 @@ func loadConfig() (*config.Config, string, error) {
 		return cfg, cfgFile, err
 	}
 
-	cwd, err := os.Getwd()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("getting working directory: %w", err)
+		return nil, "", fmt.Errorf("getting home dir: %w", err)
 	}
 
-	path, err := config.FindConfigFile(cwd)
-	if err != nil {
-		return nil, "", err
-	}
-
+	path := config.DefaultKnotfilePath(home)
 	cfg, err := config.Load(path)
 	return cfg, path, err
 }

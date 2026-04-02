@@ -55,6 +55,25 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// KnotfileName is the canonical name of the configuration file.
+const KnotfileName = "Knotfile"
+
+// EnvKnotDir is the environment variable that overrides the default dotfiles directory.
+const EnvKnotDir = "KNOT_DIR"
+
+// DefaultDir returns the dotfiles directory: $KNOT_DIR if set, otherwise homeDir/.dotfiles.
+func DefaultDir(homeDir string) string {
+	if d := os.Getenv(EnvKnotDir); d != "" {
+		return d
+	}
+	return filepath.Join(homeDir, ".dotfiles")
+}
+
+// DefaultKnotfilePath returns the default path to the Knotfile for the given home directory.
+func DefaultKnotfilePath(homeDir string) string {
+	return filepath.Join(DefaultDir(homeDir), KnotfileName)
+}
+
 // FindConfigFile walks upward from startDir looking for a Knotfile.
 // Returns the absolute path to the first Knotfile found, or an error if none exists.
 func FindConfigFile(startDir string) (string, error) {
@@ -72,7 +91,7 @@ func FindConfigFile(startDir string) (string, error) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Reached filesystem root without finding the file.
-			return "", fmt.Errorf("Knotfile not found (searched from %q upward)", startDir)
+			return "", fmt.Errorf("knotfile not found (searched from %q upward)", startDir)
 		}
 		dir = parent
 	}
