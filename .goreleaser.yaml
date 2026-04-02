@@ -49,3 +49,12 @@ homebrew_casks:
     homepage: "https://github.com/oxGrad/knot"
     description: "A lightweight, configurable dotfiles manager"
     license: MIT
+  - name: knot-nightly
+    skip_upload: "{{ not .Prerelease }}"
+    repository:
+      owner: oxGrad
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/oxGrad/knot"
+    description: "A lightweight, configurable dotfiles manager"
+    license: MIT
