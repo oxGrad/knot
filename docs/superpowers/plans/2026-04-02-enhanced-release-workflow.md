@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `.github/workflows/release.yml`
 
-- [ ] **Step 1: Expand tag triggers and add branch restriction**
+- [x] **Step 1: Expand tag triggers and add branch restriction**
 
 ```yaml
 on:
@@ -36,11 +36,11 @@ jobs:
       # ... (rest of the file remains same)
 ```
 
-- [ ] **Step 2: Verify YAML syntax**
+- [x] **Step 2: Verify YAML syntax**
 
 Run: `yamllint .github/workflows/release.yml` (if available) or manually check for indentation.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .github/workflows/release.yml
@@ -52,7 +52,7 @@ git commit -m "ci: update release trigger with nightly tags and branch restricti
 **Files:**
 - Modify: `.goreleaser.yaml`
 
-- [ ] **Step 1: Replace brews with homebrew_casks for stable releases**
+- [x] **Step 1: Replace brews with homebrew_casks for stable releases**
 
 ```yaml
 homebrew_casks:
@@ -70,7 +70,7 @@ homebrew_casks:
     # GoReleaser will generate a Cask that downloads the archive and links the binary.
 ```
 
-- [ ] **Step 2: Commit**
+- [x] **Step 2: Commit**
 
 ```bash
 git add .goreleaser.yaml
@@ -82,7 +82,7 @@ git commit -m "chore: migrate stable release to homebrew_casks"
 **Files:**
 - Modify: `.goreleaser.yaml`
 
-- [ ] **Step 1: Add homebrew_casks entry for nightly builds**
+- [x] **Step 1: Add homebrew_casks entry for nightly builds**
 
 ```yaml
 homebrew_casks:
@@ -109,11 +109,11 @@ homebrew_casks:
     license: MIT
 ```
 
-- [ ] **Step 2: Check GoReleaser config validity**
+- [x] **Step 2: Check GoReleaser config validity**
 
 Run: `goreleaser check`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add .goreleaser.yaml
@@ -122,15 +122,15 @@ git commit -m "chore: add knot-nightly homebrew_cask"
 
 ### Task 4: Final Verification and Cleanup
 
-- [ ] **Step 1: Verify design spec compliance**
+- [x] **Step 1: Verify design spec compliance**
 
 Ensure `.Prerelease` logic correctly matches the spec.
 - Stable (`v1.0.0`): `.Prerelease` is false -> `knot` uploaded, `knot-nightly` skipped.
 - Nightly (`v1.0.0-nightly...`): `.Prerelease` is true -> `knot` skipped, `knot-nightly` uploaded.
 
-- [ ] **Step 2: Remove temporary design spec (optional, follow project norms)**
+- [x] **Step 2: Remove temporary design spec (optional, follow project norms)**
 
-- [ ] **Step 3: Final commit**
+- [x] **Step 3: Final commit**
 
 ```bash
 git commit --allow-empty -m "ci: complete enhanced release workflow implementation"
