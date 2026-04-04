@@ -19,6 +19,7 @@ var rootCmd = &cobra.Command{
 	Long: `Knot manages your dotfiles via symlinks.
 It reads a Knotfile and creates or removes symlinks
 based on your package definitions.`,
+	RunE: runTUI,
 }
 
 // Execute runs the root command.
