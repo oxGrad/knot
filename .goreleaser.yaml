@@ -33,6 +33,10 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  prerelease: auto
+  make_latest: "{{ not .Prerelease }}"
+
 changelog:
   sort: asc
   filters:
