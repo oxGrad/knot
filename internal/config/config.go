@@ -72,7 +72,7 @@ func FindConfigFile(startDir string) (string, error) {
 		parent := filepath.Dir(dir)
 		if parent == dir {
 			// Reached filesystem root without finding the file.
-			return "", fmt.Errorf("Knotfile not found (searched from %q upward)", startDir)
+			return "", fmt.Errorf("knotfile not found (searched from %q upward)", startDir)
 		}
 		dir = parent
 	}
