@@ -536,6 +536,75 @@ func TestPlanUntie_NoLinks(t *testing.T) {
 	}
 }
 
+// TestPlanUntie_NotLinked_SkipsNotCreates verifies that PlanUntie never produces
+// OpCreate actions — the root cause of the toggle bug where untie would link
+// files that weren't yet linked.
+func TestPlanUntie_NotLinked_SkipsNotCreates(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"init.lua": "-- config",
+		"lazy.lua": "-- lazy",
+	})
+	target := t.TempDir()
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+
+	// Nothing tied — PlanUntie must not produce any OpCreate.
+	actions, err := l.PlanUntie(cfg, []string{"nvim"})
+	if err != nil {
+		t.Fatalf("PlanUntie() error: %v", err)
+	}
+
+	if creates := filterOp(actions, OpCreate); len(creates) != 0 {
+		t.Errorf("PlanUntie produced %d OpCreate actions, want 0 (toggle bug)", len(creates))
+	}
+}
+
+// TestApply_UntieDoesNotToggle is the end-to-end regression test for the toggle
+// bug: tie → untie → untie again must not re-create the symlink.
+func TestApply_UntieDoesNotToggle(t *testing.T) {
+	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
+	target := t.TempDir()
+	linkPath := filepath.Join(target, "init.lua")
+
+	l := newTestLinker(false)
+	l.Writer = &bytes.Buffer{}
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+
+	// Tie.
+	actions, _ := l.Plan(cfg, []string{"nvim"})
+	_ = l.Apply(actions)
+
+	// Untie.
+	untieActions, _ := l.PlanUntie(cfg, []string{"nvim"})
+	_ = l.Apply(untieActions)
+
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Fatal("symlink should not exist after first untie")
+	}
+
+	// Untie again — must not re-create the symlink.
+	untieActions2, err := l.PlanUntie(cfg, []string{"nvim"})
+	if err != nil {
+		t.Fatalf("second PlanUntie() error: %v", err)
+	}
+	if err := l.Apply(untieActions2); err != nil {
+		t.Fatalf("second Apply() error: %v", err)
+	}
+
+	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+		t.Error("untie toggled the symlink back — bug is present")
+	}
+}
+
 func TestApply_DryRunRemove(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
 	target := t.TempDir()

@@ -198,9 +198,13 @@ func (l *Linker) PlanUntie(cfg *config.Config, packageNames []string) ([]LinkAct
 	}
 
 	for i, a := range actions {
-		if a.Op == OpExists {
+		switch a.Op {
+		case OpExists:
 			actions[i].Op = OpRemove
 			actions[i].Reason = "removing symlink"
+		case OpCreate:
+			actions[i].Op = OpSkip
+			actions[i].Reason = "not linked"
 		}
 	}
 	return actions, nil
