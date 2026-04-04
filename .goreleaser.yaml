@@ -45,7 +45,7 @@ changelog:
       - "^test:"
       - "^chore:"
 
-homebrew_casks:
+brews:
   - name: knot
     skip_upload: "{{ .Prerelease }}"
     repository:
@@ -62,5 +62,7 @@ homebrew_casks:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/oxGrad/knot"
-    description: "A lightweight, configurable dotfiles manager"
+    description: "A lightweight, configurable dotfiles manager (nightly)"
     license: MIT
+    install: |
+      bin.install "knot" => "knot-nightly"
