@@ -248,7 +248,94 @@ Add `tags` to the `package` definition:
 
 ---
 
-## 7. Files Changed
+## 7. Schema
+
+Add `tags` to the `package` definition in `schema/knotfile.schema.json`:
+
+```json
+"tags": {
+  "type": "array",
+  "description": "Optional list of tag names for grouping packages. Used with --tag flag and the TUI Tags tab.",
+  "items": {
+    "type": "string",
+    "minLength": 1
+  },
+  "uniqueItems": true
+}
+```
+
+---
+
+## 8. Example Knotfile (`cmd/examples/Knotfile`)
+
+Replace the existing three-package example with one that demonstrates tags:
+
+```yaml
+packages:
+  nvim:
+    target: ~/.config/nvim
+    tags: [work]
+    ignore:
+      - "*.log"
+      - ".DS_Store"
+
+  tmux:
+    target: ~/.config/tmux
+    tags: [work]
+
+  zsh:
+    source: ./zsh
+    target: ~/
+    tags: [home]
+    ignore:
+      - "README.md"
+
+  yabai:
+    target: ~/.config/yabai
+    tags: [home]
+    condition:
+      os: darwin
+
+  i3:
+    target: ~/.config/i3
+    tags: [home, linux]
+    condition:
+      os: linux
+
+  # untagged — still usable by name: knot tie secrets
+  secrets:
+    target: ~/.ssh
+```
+
+---
+
+## 9. README
+
+Three additions to `README.md`:
+
+**1. Knotfile fields table** — add `tags` row:
+
+| Field | Required | Description |
+|---|---|---|
+| `tags` | — | List of tag names; enables `--tag` flag and Tags tab in TUI |
+
+**2. Configuration section** — update the example block to include `tags` on at least two packages (showing multi-tag and untagged cases).
+
+**3. CLI Reference section** — document `--tag` on tie/untie/plan:
+
+```
+knot tie --tag work        Tie all packages tagged "work"
+knot untie --tag home      Untie all packages tagged "home"
+knot plan --tag linux      Dry-run for packages tagged "linux"
+```
+
+And add a note in the interactive TUI section:
+
+> Use `[` / `]` to switch between the Packages tab and the Tags tab. The Tags tab shows packages grouped by tag in a tree view. Press `space` on a tag row to bulk-toggle all its packages; `enter` to collapse/expand.
+
+---
+
+## 10. Files Changed
 
 | File | Change |
 |------|--------|
@@ -262,6 +349,6 @@ Add `tags` to the `package` definition:
 | `cmd/validate.go` | Add empty/duplicate tag checks |
 | `cmd/tui.go` | Tags tab: `tagRow`, `tagItem`, `visibleTagItems`, tree rendering, keybindings |
 | `cmd/tui_test.go` | TUI tag logic tests |
-| `schema/knotfile.schema.json` | Add `tags` property to package definition |
-| `cmd/examples/Knotfile` | Add tag examples |
-| `README.md` | Document `tags` field and `--tag` flag |
+| `schema/knotfile.schema.json` | Add `tags` property (see §7) |
+| `cmd/examples/Knotfile` | Replace with tag-annotated example (see §8) |
+| `README.md` | Add `tags` to field table, example, and CLI reference (see §9) |
