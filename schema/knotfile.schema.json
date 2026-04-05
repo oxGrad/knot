@@ -39,6 +39,15 @@
           },
           "uniqueItems": true
         },
+        "tags": {
+          "type": "array",
+          "description": "Optional list of tag names for grouping packages. Used with --tag flag and the TUI Tags tab.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
         "condition": {
           "$ref": "#/definitions/condition"
         }
