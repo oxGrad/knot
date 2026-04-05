@@ -52,6 +52,17 @@ func loadConfig() (*config.Config, string, error) {
 	return cfg, path, err
 }
 
+// resolveTagArg expands a tag name into the sorted list of package names that carry it.
+// Returns an error if the tag is not found in any package.
+func resolveTagArg(tag string, cfg *config.Config) ([]string, error) {
+	byTag := config.PackagesByTag(cfg)
+	names, ok := byTag[tag]
+	if !ok {
+		return nil, fmt.Errorf("unknown tag %q", tag)
+	}
+	return names, nil
+}
+
 // resolvePackageArgs returns the list of packages to operate on.
 // If all is true, returns all package names from cfg.
 // Otherwise validates and returns the provided args.
