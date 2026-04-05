@@ -318,6 +318,37 @@ func (m *model) togglePackage(i int) {
 	m.toggles[row.name] = !m.toggles[row.name]
 }
 
+// toggleTag bulk-toggles all non-skipped, non-conflict packages in a tag.
+// tied → marks all for untie; untied or partial → marks missing for tie.
+func (m *model) toggleTag(tr *tagRow) {
+	switch tr.status {
+	case statusTied:
+		for _, pkg := range tr.pkgs {
+			if pkg.status == statusSkipped || pkg.status == statusConflict {
+				continue
+			}
+			m.toggles[pkg.name] = false
+		}
+	case statusUntied:
+		for _, pkg := range tr.pkgs {
+			if pkg.status == statusSkipped || pkg.status == statusConflict {
+				continue
+			}
+			m.toggles[pkg.name] = true
+		}
+	case statusPartial:
+		for _, pkg := range tr.pkgs {
+			if pkg.status == statusSkipped || pkg.status == statusConflict {
+				continue
+			}
+			currentlyTied := pkg.status == statusTied || pkg.status == statusPartial
+			if !currentlyTied {
+				m.toggles[pkg.name] = true
+			}
+		}
+	}
+}
+
 func (m *model) listHeaderLines() int {
 	// title + git-info (if available) + divider = 2 or 3
 	if m.gitBranch != "" {

@@ -1331,6 +1331,83 @@ func TestApplyCmd_NoPendingChanges(t *testing.T) {
 	}
 }
 
+// ── toggleTag ─────────────────────────────────────────────────────────────────
+
+func TestToggleTag_TiedToUntied(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusTied},
+			{name: "tmux", status: statusTied},
+		},
+		toggles: map[string]bool{"nvim": true, "tmux": true},
+	}
+	tr := &tagRow{
+		name:   "work",
+		status: statusTied,
+		pkgs:   []pkgRow{{name: "nvim", status: statusTied}, {name: "tmux", status: statusTied}},
+	}
+	m.toggleTag(tr)
+	if m.toggles["nvim"] || m.toggles["tmux"] {
+		t.Error("toggleTag on tied tag should mark all packages for untie")
+	}
+}
+
+func TestToggleTag_UntiedToTied(t *testing.T) {
+	m := &model{
+		rows:    []pkgRow{{name: "nvim", status: statusUntied}, {name: "tmux", status: statusUntied}},
+		toggles: map[string]bool{"nvim": false, "tmux": false},
+	}
+	tr := &tagRow{
+		name:   "work",
+		status: statusUntied,
+		pkgs:   []pkgRow{{name: "nvim", status: statusUntied}, {name: "tmux", status: statusUntied}},
+	}
+	m.toggleTag(tr)
+	if !m.toggles["nvim"] || !m.toggles["tmux"] {
+		t.Error("toggleTag on untied tag should mark all packages for tie")
+	}
+}
+
+func TestToggleTag_PartialCompletes(t *testing.T) {
+	m := &model{
+		rows:    []pkgRow{{name: "nvim", status: statusTied}, {name: "tmux", status: statusUntied}},
+		toggles: map[string]bool{"nvim": true, "tmux": false},
+	}
+	tr := &tagRow{
+		name:   "work",
+		status: statusPartial,
+		pkgs:   []pkgRow{{name: "nvim", status: statusTied}, {name: "tmux", status: statusUntied}},
+	}
+	m.toggleTag(tr)
+	if !m.toggles["nvim"] {
+		t.Error("nvim (already tied) should remain true after completing partial tag")
+	}
+	if !m.toggles["tmux"] {
+		t.Error("tmux (untied) should be marked for tie when completing partial tag")
+	}
+}
+
+func TestToggleTag_SkipsSkippedAndConflict(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"nvim": false, "yabai": false},
+	}
+	tr := &tagRow{
+		name:   "work",
+		status: statusUntied,
+		pkgs: []pkgRow{
+			{name: "nvim", status: statusUntied},
+			{name: "yabai", status: statusSkipped},
+		},
+	}
+	m.toggleTag(tr)
+	if !m.toggles["nvim"] {
+		t.Error("nvim should be marked for tie")
+	}
+	if m.toggles["yabai"] {
+		t.Error("skipped package should not be toggled")
+	}
+}
+
 // ── buildTagRows ──────────────────────────────────────────────────────────────
 
 func TestBuildTagRows_Basic(t *testing.T) {
