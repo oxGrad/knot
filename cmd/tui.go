@@ -930,7 +930,7 @@ func (m model) viewList() string {
 				pending = stylePending.Render(" *")
 			}
 
-			b.WriteString(fmt.Sprintf("%s%s  [%s]%s\n", cursor, name, row.status.label(), pending))
+			fmt.Fprintf(&b, "%s%s  [%s]%s\n", cursor, name, row.status.label(), pending)
 		}
 	}
 
@@ -1015,21 +1015,20 @@ func (m model) viewTags() string {
 					}
 				}
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
-				b.WriteString(fmt.Sprintf("%s%s%s  [%s]%s\n",
+				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
 					styleCyan.Render(styleBold.Render(name)),
-					item.tag.status.label(), pendingMark))
+					item.tag.status.label(), pendingMark)
 			} else {
 				connector := "├── "
 				if item.isLastChild {
 					connector = "└── "
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
-				b.WriteString(fmt.Sprintf("%s  %s%s  [%s]\n",
+				fmt.Fprintf(&b, "%s  %s  [%s]\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
-					"",
-					item.pkg.status.label()))
+					item.pkg.status.label())
 			}
 		}
 	}
