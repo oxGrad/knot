@@ -598,6 +598,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch m.phase {
 		case phaseList:
+			if m.activeTab == tabTags {
+				return m.updateTags(msg)
+			}
 			return m.updateList(msg)
 		case phaseConfirm:
 			return m.updateConfirm(msg)
@@ -718,6 +721,8 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, fetchBranchesCmd(dotfilesDir(m.cfgPath))
 	case "e":
 		return m, editorCmd(m.cfgPath)
+	case "]":
+		m.activeTab = tabTags
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
@@ -764,6 +769,55 @@ func (m model) updateBranch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	items := visibleTagItems(m.tagRows)
+	switch msg.String() {
+	case "up", "k":
+		if m.tagCursor > 0 {
+			m.tagCursor--
+			m.adjustTagOffset()
+		}
+	case "down", "j":
+		if m.tagCursor < len(items)-1 {
+			m.tagCursor++
+			m.adjustTagOffset()
+		}
+	case " ":
+		if m.tagCursor < len(items) {
+			item := items[m.tagCursor]
+			if item.isTag {
+				m.toggleTag(item.tag)
+			} else {
+				for i, r := range m.rows {
+					if r.name == item.pkg.name {
+						m.togglePackage(i)
+						break
+					}
+				}
+			}
+		}
+	case "enter":
+		if m.tagCursor < len(items) {
+			item := items[m.tagCursor]
+			if item.isTag {
+				item.tag.collapsed = !item.tag.collapsed
+				m.adjustTagOffset()
+			}
+		}
+	case "a":
+		if m.pendingCount() == 0 {
+			break
+		}
+		m.confirmLines = m.buildConfirmLines()
+		m.phase = phaseConfirm
+	case "[":
+		m.activeTab = tabPackages
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
 func (m model) buildConfirmLines() []string {
 	var lines []string
 	for _, row := range m.rows {
@@ -796,6 +850,9 @@ func (m model) View() string {
 	case phaseBranch:
 		return m.viewBranch()
 	default:
+		if m.activeTab == tabTags {
+			return m.viewTags()
+		}
 		return m.viewList()
 	}
 }
@@ -818,6 +875,7 @@ func (m model) viewList() string {
 		b.WriteString(styleDim.Render("on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo) + "\n")
 	}
 	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	b.WriteString(m.renderTabHeader() + "\n")
 
 	// Package list
 	if len(m.rows) == 0 {

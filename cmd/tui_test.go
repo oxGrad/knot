@@ -1331,6 +1331,123 @@ func TestApplyCmd_NoPendingChanges(t *testing.T) {
 	}
 }
 
+// ── updateTags ────────────────────────────────────────────────────────────────
+
+func baseTagModel(t *testing.T) model {
+	t.Helper()
+	source1, target1 := makeTempPackage(t, map[string]string{"f": "x"})
+	source2, target2 := makeTempPackage(t, map[string]string{"g": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source1, Target: target1, Tags: []string{"work"}},
+			"tmux": {Source: source2, Target: target2, Tags: []string{"work"}},
+		},
+	}
+	allRows, err := buildRows(cfg, lnk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return model{
+		cfg:       cfg,
+		cfgPath:   "/tmp/Knotfile",
+		lnk:       lnk,
+		rows:      allRows,
+		toggles:   seedToggles(allRows),
+		tagRows:   buildTagRows(cfg, allRows),
+		activeTab: tabTags,
+		phase:     phaseList,
+		width:     80,
+		height:    24,
+	}
+}
+
+func TestUpdateTags_NavigateDown(t *testing.T) {
+	m := baseTagModel(t)
+	m.tagCursor = 0
+	result, _ := m.updateTags(keyMsg("j"))
+	newM := result.(model)
+	if newM.tagCursor != 1 {
+		t.Errorf("'j' should move tagCursor to 1, got %d", newM.tagCursor)
+	}
+}
+
+func TestUpdateTags_NavigateUp(t *testing.T) {
+	m := baseTagModel(t)
+	m.tagCursor = 1
+	result, _ := m.updateTags(keyMsg("k"))
+	newM := result.(model)
+	if newM.tagCursor != 0 {
+		t.Errorf("'k' should move tagCursor to 0, got %d", newM.tagCursor)
+	}
+}
+
+func TestUpdateTags_EnterCollapses(t *testing.T) {
+	m := baseTagModel(t)
+	m.tagCursor = 0 // on the tag row
+	result, _ := m.updateTags(keyMsg("enter"))
+	newM := result.(model)
+	if !newM.tagRows[0].collapsed {
+		t.Error("enter on tag row should collapse it")
+	}
+	// enter again should expand
+	result2, _ := newM.updateTags(keyMsg("enter"))
+	newM2 := result2.(model)
+	if newM2.tagRows[0].collapsed {
+		t.Error("second enter should expand the tag row")
+	}
+}
+
+func TestUpdateTags_SpaceOnTagToggles(t *testing.T) {
+	m := baseTagModel(t)
+	m.tagCursor = 0 // on the 'work' tag row (status: untied)
+	initial := m.toggles["nvim"]
+	result, _ := m.updateTags(keyMsg(" "))
+	newM := result.(model)
+	if newM.toggles["nvim"] == initial {
+		t.Error("space on tag row should toggle its packages")
+	}
+}
+
+func TestUpdateTags_SwitchToPackages(t *testing.T) {
+	m := baseTagModel(t)
+	result, _ := m.updateTags(keyMsg("["))
+	newM := result.(model)
+	if newM.activeTab != tabPackages {
+		t.Error("'[' should switch to packages tab")
+	}
+}
+
+func TestUpdateTags_Quit(t *testing.T) {
+	m := baseTagModel(t)
+	_, cmd := m.updateTags(keyMsg("q"))
+	if cmd == nil {
+		t.Error("'q' should return quit command")
+	}
+}
+
+// ── tab dispatch ──────────────────────────────────────────────────────────────
+
+func TestUpdateList_SwitchToTags(t *testing.T) {
+	m := baseModel(t)
+	m.activeTab = tabPackages
+	result, _ := m.updateList(keyMsg("]"))
+	newM := result.(model)
+	if newM.activeTab != tabTags {
+		t.Error("']' in packages tab should switch to tags tab")
+	}
+}
+
+func TestView_TagsTabDispatch(t *testing.T) {
+	m := baseTagModel(t)
+	m.phase = phaseList
+	m.activeTab = tabTags
+	out := m.View()
+	if !containsSubstr(out, "work") {
+		t.Error("View() in tabTags should show tag names")
+	}
+}
+
 // ── renderTabHeader ───────────────────────────────────────────────────────────
 
 func TestRenderTabHeader_PackagesActive(t *testing.T) {
