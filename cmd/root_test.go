@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/oxgrad/knot/internal/config"
@@ -112,5 +113,45 @@ func TestResolvePackageArgs_EmptyArgs(t *testing.T) {
 	}
 	if len(names) != 0 {
 		t.Errorf("expected empty args returned unchanged, got %v", names)
+	}
+}
+
+func TestValidate_EmptyTagName(t *testing.T) {
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Tags: []string{""}},
+		},
+	}
+	var errs []string
+	for name, pkg := range cfg.Packages {
+		for _, tag := range pkg.Tags {
+			if tag == "" {
+				errs = append(errs, fmt.Sprintf("[%s]: tag name must not be empty", name))
+			}
+		}
+	}
+	if len(errs) != 1 {
+		t.Fatalf("expected 1 error, got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidate_DuplicateTag(t *testing.T) {
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Tags: []string{"work", "work"}},
+		},
+	}
+	var warns []string
+	for name, pkg := range cfg.Packages {
+		seen := make(map[string]bool)
+		for _, tag := range pkg.Tags {
+			if seen[tag] {
+				warns = append(warns, fmt.Sprintf("[%s]: duplicate tag %q", name, tag))
+			}
+			seen[tag] = true
+		}
+	}
+	if len(warns) != 1 {
+		t.Fatalf("expected 1 warning, got %d: %v", len(warns), warns)
 	}
 }
