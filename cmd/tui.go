@@ -176,6 +176,32 @@ type checkoutDoneMsg struct {
 	err    error
 }
 
+// ── tab types ─────────────────────────────────────────────────────────────────
+
+type tabKind int
+
+const (
+	tabPackages tabKind = iota
+	tabTags
+)
+
+// ── tag types ─────────────────────────────────────────────────────────────────
+
+type tagRow struct {
+	name      string
+	status    pkgStatus
+	pkgs      []pkgRow
+	collapsed bool
+}
+
+type tagItem struct {
+	isTag       bool
+	tag         *tagRow // set when isTag == true
+	pkg         *pkgRow // set when isTag == false
+	tagName     string  // parent tag name (for package items)
+	isLastChild bool    // for package items: is this the last child of its tag?
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func buildRows(cfg *config.Config, lnk *linker.Linker) ([]pkgRow, error) {
@@ -198,6 +224,66 @@ func buildRows(cfg *config.Config, lnk *linker.Linker) ([]pkgRow, error) {
 		})
 	}
 	return rows, nil
+}
+
+// buildTagRows groups the already-computed pkgRows by tag, sorted by tag name.
+// It does not call Plan again — it reuses the rows already built.
+func buildTagRows(cfg *config.Config, allRows []pkgRow) []tagRow {
+	byTag := config.PackagesByTag(cfg)
+	if len(byTag) == 0 {
+		return nil
+	}
+
+	tagNames := make([]string, 0, len(byTag))
+	for name := range byTag {
+		tagNames = append(tagNames, name)
+	}
+	sort.Strings(tagNames)
+
+	rowsByName := make(map[string]pkgRow, len(allRows))
+	for _, r := range allRows {
+		rowsByName[r.name] = r
+	}
+
+	rows := make([]tagRow, 0, len(tagNames))
+	for _, tagName := range tagNames {
+		pkgNames := byTag[tagName]
+		pkgs := make([]pkgRow, 0, len(pkgNames))
+		var allActions []linker.LinkAction
+		for _, pname := range pkgNames {
+			if r, ok := rowsByName[pname]; ok {
+				pkgs = append(pkgs, r)
+				allActions = append(allActions, r.actions...)
+			}
+		}
+		rows = append(rows, tagRow{
+			name:   tagName,
+			status: computeStatus(allActions),
+			pkgs:   pkgs,
+		})
+	}
+	return rows
+}
+
+// visibleTagItems returns the flat list of items currently visible in the Tags tab,
+// respecting each tagRow's collapsed state.
+func visibleTagItems(rows []tagRow) []tagItem {
+	var items []tagItem
+	for i := range rows {
+		tr := &rows[i]
+		items = append(items, tagItem{isTag: true, tag: tr})
+		if !tr.collapsed {
+			for j := range tr.pkgs {
+				items = append(items, tagItem{
+					isTag:       false,
+					pkg:         &tr.pkgs[j],
+					tagName:     tr.name,
+					isLastChild: j == len(tr.pkgs)-1,
+				})
+			}
+		}
+	}
+	return items
 }
 
 func seedToggles(rows []pkgRow) map[string]bool {

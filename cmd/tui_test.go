@@ -1331,6 +1331,124 @@ func TestApplyCmd_NoPendingChanges(t *testing.T) {
 	}
 }
 
+// ── buildTagRows ──────────────────────────────────────────────────────────────
+
+func TestBuildTagRows_Basic(t *testing.T) {
+	source1, target1 := makeTempPackage(t, map[string]string{"f": "x"})
+	source2, target2 := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source1, Target: target1, Tags: []string{"work"}},
+			"tmux": {Source: source2, Target: target2, Tags: []string{"work"}},
+		},
+	}
+	allRows, err := buildRows(cfg, lnk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagRows := buildTagRows(cfg, allRows)
+	if len(tagRows) != 1 {
+		t.Fatalf("expected 1 tag row, got %d", len(tagRows))
+	}
+	if tagRows[0].name != "work" {
+		t.Errorf("expected tag 'work', got %q", tagRows[0].name)
+	}
+	if len(tagRows[0].pkgs) != 2 {
+		t.Errorf("expected 2 packages in tag, got %d", len(tagRows[0].pkgs))
+	}
+}
+
+func TestBuildTagRows_Sorted(t *testing.T) {
+	sourceA, targetA := makeTempPackage(t, map[string]string{"f": "x"})
+	sourceB, targetB := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"zsh":  {Source: sourceA, Target: targetA, Tags: []string{"home"}},
+			"nvim": {Source: sourceB, Target: targetB, Tags: []string{"work"}},
+		},
+	}
+	allRows, _ := buildRows(cfg, lnk)
+	tagRows := buildTagRows(cfg, allRows)
+	if len(tagRows) != 2 || tagRows[0].name != "home" || tagRows[1].name != "work" {
+		t.Errorf("tag rows should be sorted by name, got %v", tagRows)
+	}
+}
+
+func TestBuildTagRows_NoTaggedPackages(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"secrets": {Source: source, Target: target},
+		},
+	}
+	allRows, _ := buildRows(cfg, lnk)
+	if got := buildTagRows(cfg, allRows); len(got) != 0 {
+		t.Errorf("expected 0 tag rows for untagged packages, got %d", len(got))
+	}
+}
+
+// ── visibleTagItems ────────────────────────────────────────────────────────────
+
+func TestVisibleTagItems_Expanded(t *testing.T) {
+	rows := []tagRow{
+		{
+			name: "work",
+			pkgs: []pkgRow{
+				{name: "nvim"},
+				{name: "tmux"},
+			},
+			collapsed: false,
+		},
+	}
+	items := visibleTagItems(rows)
+	// 1 tag + 2 packages
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items (1 tag + 2 pkg), got %d", len(items))
+	}
+	if !items[0].isTag {
+		t.Error("first item should be tag")
+	}
+	if items[1].isTag || items[1].pkg.name != "nvim" {
+		t.Error("second item should be nvim package")
+	}
+	if items[2].isLastChild != true {
+		t.Error("last child should have isLastChild=true")
+	}
+}
+
+func TestVisibleTagItems_Collapsed(t *testing.T) {
+	rows := []tagRow{
+		{
+			name:      "work",
+			pkgs:      []pkgRow{{name: "nvim"}, {name: "tmux"}},
+			collapsed: true,
+		},
+	}
+	items := visibleTagItems(rows)
+	// only the tag row, no children
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item when collapsed, got %d", len(items))
+	}
+	if !items[0].isTag {
+		t.Error("only item should be the tag row")
+	}
+}
+
+func TestVisibleTagItems_MultipleTags(t *testing.T) {
+	rows := []tagRow{
+		{name: "home", pkgs: []pkgRow{{name: "zsh"}}, collapsed: false},
+		{name: "work", pkgs: []pkgRow{{name: "nvim"}, {name: "tmux"}}, collapsed: true},
+	}
+	items := visibleTagItems(rows)
+	// home (1 tag + 1 pkg) + work (1 tag, collapsed) = 3
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func containsSubstr(s, sub string) bool {
