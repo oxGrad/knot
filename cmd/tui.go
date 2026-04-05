@@ -639,11 +639,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cfg = msg.cfg
 		m.rows = msg.rows
 		m.toggles = seedToggles(m.rows)
+
+		// Rebuild tag rows, preserving each tag's collapsed state.
+		newTagRows := buildTagRows(msg.cfg, msg.rows)
+		collapsedState := make(map[string]bool, len(m.tagRows))
+		for _, tr := range m.tagRows {
+			collapsedState[tr.name] = tr.collapsed
+		}
+		for i := range newTagRows {
+			if c, ok := collapsedState[newTagRows[i].name]; ok {
+				newTagRows[i].collapsed = c
+			}
+		}
+		m.tagRows = newTagRows
+
+		// Clamp both cursors.
 		m.cursor = min(m.cursor, len(m.rows)-1)
 		if m.cursor < 0 {
 			m.cursor = 0
 		}
+		newVisible := visibleTagItems(m.tagRows)
+		m.tagCursor = min(m.tagCursor, len(newVisible)-1)
+		if m.tagCursor < 0 {
+			m.tagCursor = 0
+		}
 		m.adjustOffset()
+		m.adjustTagOffset()
 		m.phase = phaseList
 		return m, nil
 
@@ -1122,6 +1143,7 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		lnk:     lnk,
 		rows:    rows,
 		toggles: seedToggles(rows),
+		tagRows: buildTagRows(cfg, rows),
 		phase:   phaseList,
 	}
 
