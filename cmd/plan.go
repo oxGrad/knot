@@ -7,7 +7,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var planAll bool
+var (
+	planAll bool
+	planTag string
+)
 
 var planCmd = &cobra.Command{
 	Use:   "plan [package...]",
@@ -15,7 +18,16 @@ var planCmd = &cobra.Command{
 	Long: `Plan shows exactly what symlinks knot would create or remove,
 without actually modifying the filesystem.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if !planAll && len(args) == 0 {
+		hasArgs := len(args) > 0
+		hasTag := planTag != ""
+
+		if hasTag && planAll {
+			return fmt.Errorf("cannot use --tag with --all")
+		}
+		if hasTag && hasArgs {
+			return fmt.Errorf("cannot use --tag with package names")
+		}
+		if !planAll && !hasTag && !hasArgs {
 			return fmt.Errorf("specify at least one package or use --all")
 		}
 
@@ -24,7 +36,12 @@ without actually modifying the filesystem.`,
 			return err
 		}
 
-		names, err := resolvePackageArgs(args, planAll, cfg)
+		var names []string
+		if hasTag {
+			names, err = resolveTagArg(planTag, cfg)
+		} else {
+			names, err = resolvePackageArgs(args, planAll, cfg)
+		}
 		if err != nil {
 			return err
 		}
@@ -34,7 +51,6 @@ without actually modifying the filesystem.`,
 		if err != nil {
 			return err
 		}
-
 		lnk.PrintPlan(actions)
 		return nil
 	},
@@ -42,5 +58,6 @@ without actually modifying the filesystem.`,
 
 func init() {
 	planCmd.Flags().BoolVar(&planAll, "all", false, "plan all packages")
+	planCmd.Flags().StringVar(&planTag, "tag", "", "plan all packages with this tag")
 	rootCmd.AddCommand(planCmd)
 }
