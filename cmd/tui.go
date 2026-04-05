@@ -118,6 +118,11 @@ type model struct {
 	offset  int
 	toggles map[string]bool
 
+	activeTab tabKind
+	tagRows   []tagRow
+	tagCursor int
+	tagOffset int
+
 	// git info shown in header
 	gitBranch    string
 	gitSHA       string
@@ -400,6 +405,46 @@ func (m *model) adjustBranchOffset() {
 	if m.branchCursor >= m.branchOffset+vh {
 		m.branchOffset = m.branchCursor - vh + 1
 	}
+}
+
+func (m *model) tagVisibleHeight() int {
+	// header + git? + divider + tab header + blank + status + help = listHeaderLines + 4
+	overhead := m.listHeaderLines() + 4
+	v := m.height - overhead
+	if v < 1 {
+		return 1
+	}
+	return v
+}
+
+func (m *model) adjustTagOffset() {
+	items := visibleTagItems(m.tagRows)
+	vh := m.tagVisibleHeight()
+	if vh <= 0 || len(items) == 0 {
+		return
+	}
+	if m.tagCursor < m.tagOffset {
+		m.tagOffset = m.tagCursor
+	}
+	if m.tagCursor >= m.tagOffset+vh {
+		m.tagOffset = m.tagCursor - vh + 1
+	}
+	maxOffset := max(0, len(items)-vh)
+	if m.tagOffset > maxOffset {
+		m.tagOffset = maxOffset
+	}
+}
+
+func (m model) renderTabHeader() string {
+	var pkgTab, tagTab string
+	if m.activeTab == tabPackages {
+		pkgTab = styleBold.Render("Packages")
+		tagTab = styleDim.Render("Tags")
+	} else {
+		pkgTab = styleDim.Render("Packages")
+		tagTab = styleBold.Render("Tags")
+	}
+	return " " + pkgTab + styleDim.Render(" │ ") + tagTab
 }
 
 func dotfilesDir(cfgPath string) string {
@@ -823,6 +868,102 @@ func (m model) viewList() string {
 
 	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · b branch · r pull · e edit · q quit"))
 
+	return b.String()
+}
+
+func (m model) viewTags() string {
+	var b strings.Builder
+
+	// Header (same as viewList)
+	b.WriteString(styleBold.Render("knot") + styleDim.Render(" — interactive mode") + "\n")
+	if m.gitBranch != "" {
+		commitInfo := m.gitSHA
+		if m.gitCommitMsg != "" {
+			maxMsgLen := max(m.width-len(m.gitBranch)-len(m.gitSHA)-10, 20)
+			msg := m.gitCommitMsg
+			if len(msg) > maxMsgLen {
+				msg = msg[:maxMsgLen-1] + "…"
+			}
+			commitInfo = m.gitSHA + " " + msg
+		}
+		b.WriteString(styleDim.Render("on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo) + "\n")
+	}
+	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	b.WriteString(m.renderTabHeader() + "\n")
+	b.WriteString("\n")
+
+	items := visibleTagItems(m.tagRows)
+	if len(items) == 0 {
+		b.WriteString(styleDim.Render("No tagged packages defined.") + "\n")
+	} else {
+		// Compute name width: max of tag names and (package names + tree prefix).
+		nameWidth := 0
+		for _, tr := range m.tagRows {
+			if len(tr.name) > nameWidth {
+				nameWidth = len(tr.name)
+			}
+			for _, pkg := range tr.pkgs {
+				// indent + connector = 7 chars ("  ├── " or "  └── ")
+				if len(pkg.name)+7 > nameWidth {
+					nameWidth = len(pkg.name) + 7
+				}
+			}
+		}
+
+		vh := m.tagVisibleHeight()
+		end := m.tagOffset + vh
+		if end > len(items) {
+			end = len(items)
+		}
+
+		for i := m.tagOffset; i < end; i++ {
+			item := items[i]
+			cursor := "  "
+			if i == m.tagCursor {
+				cursor = styleCursor.Render("▶ ")
+			}
+
+			if item.isTag {
+				collapsePrefix := "  "
+				if item.tag.collapsed {
+					collapsePrefix = styleDim.Render("▶ ")
+				}
+				pendingMark := "  "
+				for _, pkg := range item.tag.pkgs {
+					if m.isPending(pkg) {
+						pendingMark = stylePending.Render(" *")
+						break
+					}
+				}
+				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
+				b.WriteString(fmt.Sprintf("%s%s%s  [%s]%s\n",
+					cursor, collapsePrefix,
+					styleCyan.Render(styleBold.Render(name)),
+					item.tag.status.label(), pendingMark))
+			} else {
+				connector := "├── "
+				if item.isLastChild {
+					connector = "└── "
+				}
+				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
+				b.WriteString(fmt.Sprintf("%s  %s%s  [%s]\n",
+					cursor,
+					styleDim.Render(connector+pkgName),
+					"",
+					item.pkg.status.label()))
+			}
+		}
+	}
+
+	b.WriteString("\n")
+	if m.statusMsg != "" {
+		b.WriteString(styleRed.Render(m.statusMsg) + "\n")
+	} else if pc := m.pendingCount(); pc > 0 {
+		b.WriteString(styleYellow.Render(fmt.Sprintf("%d pending change(s)", pc)) + "\n")
+	} else {
+		b.WriteString(styleDim.Render("No pending changes") + "\n")
+	}
+	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · [ ] tabs · q quit"))
 	return b.String()
 }
 

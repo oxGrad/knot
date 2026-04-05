@@ -1331,6 +1331,86 @@ func TestApplyCmd_NoPendingChanges(t *testing.T) {
 	}
 }
 
+// ── renderTabHeader ───────────────────────────────────────────────────────────
+
+func TestRenderTabHeader_PackagesActive(t *testing.T) {
+	m := &model{activeTab: tabPackages}
+	out := m.renderTabHeader()
+	if !containsSubstr(out, "Packages") {
+		t.Error("header should contain Packages")
+	}
+	if !containsSubstr(out, "Tags") {
+		t.Error("header should contain Tags")
+	}
+}
+
+func TestRenderTabHeader_TagsActive(t *testing.T) {
+	m := &model{activeTab: tabTags}
+	out := m.renderTabHeader()
+	if !containsSubstr(out, "Tags") {
+		t.Error("header should contain Tags")
+	}
+}
+
+// ── tagVisibleHeight ──────────────────────────────────────────────────────────
+
+func TestTagVisibleHeight_Normal(t *testing.T) {
+	m := &model{height: 24}
+	if got := m.tagVisibleHeight(); got < 1 {
+		t.Errorf("tagVisibleHeight should be >= 1, got %d", got)
+	}
+}
+
+// ── viewTags ──────────────────────────────────────────────────────────────────
+
+func TestViewTags_NonEmpty(t *testing.T) {
+	source1, target1 := makeTempPackage(t, map[string]string{"f": "x"})
+	source2, target2 := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source1, Target: target1, Tags: []string{"work"}},
+			"tmux": {Source: source2, Target: target2, Tags: []string{"work"}},
+		},
+	}
+	allRows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg:       cfg,
+		cfgPath:   "/tmp/Knotfile",
+		lnk:       lnk,
+		rows:      allRows,
+		toggles:   seedToggles(allRows),
+		tagRows:   buildTagRows(cfg, allRows),
+		activeTab: tabTags,
+		width:     80,
+		height:    24,
+	}
+	out := m.viewTags()
+	if out == "" {
+		t.Error("viewTags() should return non-empty string")
+	}
+	if !containsSubstr(out, "work") {
+		t.Error("viewTags() should show tag name")
+	}
+	if !containsSubstr(out, "nvim") {
+		t.Error("viewTags() should show package names when expanded")
+	}
+}
+
+func TestViewTags_NoTaggedPackages(t *testing.T) {
+	m := model{
+		tagRows:   nil,
+		activeTab: tabTags,
+		width:     80,
+		height:    24,
+		cfgPath:   "/tmp/Knotfile",
+	}
+	out := m.viewTags()
+	if !containsSubstr(out, "No tagged") {
+		t.Errorf("viewTags() with no tags should say 'No tagged', got:\n%s", out)
+	}
+}
+
 // ── toggleTag ─────────────────────────────────────────────────────────────────
 
 func TestToggleTag_TiedToUntied(t *testing.T) {
