@@ -44,9 +44,13 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Resolve source paths relative to the config file's directory.
+	// If source is omitted, default to ./<package-name>.
 	dir := filepath.Dir(path)
 	for name, pkg := range cfg.Packages {
-		if pkg.Source != "" && !filepath.IsAbs(pkg.Source) {
+		if pkg.Source == "" {
+			pkg.Source = "./" + name
+		}
+		if !filepath.IsAbs(pkg.Source) {
 			pkg.Source = filepath.Join(dir, pkg.Source)
 		}
 		cfg.Packages[name] = pkg

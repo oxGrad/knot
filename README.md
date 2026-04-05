@@ -51,10 +51,9 @@ Create a file named exactly `Knotfile` (no extension) at the root of your dotfil
 
 ```yaml
 packages:
-  # A simple 1-to-1 mapping
+  # source defaults to ./nvim when omitted
   nvim:
     target: ~/.config/nvim
-    source: ./nvim
     ignore:
       - "README.md"
       - ".DS_Store"
@@ -67,7 +66,6 @@ packages:
   # OS-specific package — only tied on macOS
   yabai:
     target: ~/.config/yabai
-    source: ./yabai
     condition:
       os: darwin
 ```
@@ -76,7 +74,7 @@ packages:
 
 | Field | Required | Description |
 |---|---|---|
-| `source` | ✅ | Path to source directory (relative to `Knotfile`, or absolute; `~` supported) |
+| `source` | — | Path to source directory (relative to `Knotfile`, or absolute; `~` supported). Defaults to `./<package-name>` |
 | `target` | ✅ | Destination directory where symlinks are created (`~` supported) |
 | `ignore` | — | List of glob patterns matched against file basenames |
 | `condition.os` | — | Only tie on this OS (`darwin`, `linux`, `windows`, `freebsd`) |

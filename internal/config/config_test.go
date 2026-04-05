@@ -147,6 +147,24 @@ func TestFindConfigFile_NotFound(t *testing.T) {
 	}
 }
 
+func TestLoad_DefaultSource(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  nvim:\n    target: ~/.config/nvim\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	want := filepath.Join(dir, "nvim")
+	if cfg.Packages["nvim"].Source != want {
+		t.Errorf("default source = %q, want %q", cfg.Packages["nvim"].Source, want)
+	}
+}
+
 func TestLoad_AbsoluteSourcePath(t *testing.T) {
 	dir := t.TempDir()
 	absSource := "/usr/local/share/dotfiles/nvim"

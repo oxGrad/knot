@@ -1,0 +1,1346 @@
+package cmd
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/oxgrad/knot/internal/config"
+	"github.com/oxgrad/knot/internal/linker"
+)
+
+// ── computeStatus ─────────────────────────────────────────────────────────────
+
+func TestComputeStatus_AllTied(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpExists},
+		{Op: linker.OpExists},
+	}
+	if got := computeStatus(actions); got != statusTied {
+		t.Errorf("expected statusTied, got %v", got)
+	}
+}
+
+func TestComputeStatus_AllUntied(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpCreate},
+		{Op: linker.OpCreate},
+	}
+	if got := computeStatus(actions); got != statusUntied {
+		t.Errorf("expected statusUntied, got %v", got)
+	}
+}
+
+func TestComputeStatus_Partial(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpExists},
+		{Op: linker.OpCreate},
+	}
+	if got := computeStatus(actions); got != statusPartial {
+		t.Errorf("expected statusPartial, got %v", got)
+	}
+}
+
+func TestComputeStatus_Conflict(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpExists},
+		{Op: linker.OpConflict},
+	}
+	if got := computeStatus(actions); got != statusConflict {
+		t.Errorf("expected statusConflict, got %v", got)
+	}
+}
+
+func TestComputeStatus_BrokenIsConflict(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpBroken},
+	}
+	if got := computeStatus(actions); got != statusConflict {
+		t.Errorf("expected statusConflict for broken symlink, got %v", got)
+	}
+}
+
+func TestComputeStatus_AllSkipped(t *testing.T) {
+	actions := []linker.LinkAction{
+		{Op: linker.OpSkip},
+		{Op: linker.OpSkip},
+	}
+	if got := computeStatus(actions); got != statusSkipped {
+		t.Errorf("expected statusSkipped, got %v", got)
+	}
+}
+
+func TestComputeStatus_Empty(t *testing.T) {
+	if got := computeStatus(nil); got != statusSkipped {
+		t.Errorf("expected statusSkipped for empty actions, got %v", got)
+	}
+}
+
+// ── pkgStatus.label ───────────────────────────────────────────────────────────
+
+func TestPkgStatus_Label_AllValues(t *testing.T) {
+	statuses := []pkgStatus{
+		statusTied,
+		statusUntied,
+		statusPartial,
+		statusConflict,
+		statusSkipped,
+	}
+	for _, s := range statuses {
+		label := s.label()
+		if label == "" {
+			t.Errorf("label() returned empty string for pkgStatus %d", s)
+		}
+	}
+}
+
+func TestPkgStatus_Label_Unknown(t *testing.T) {
+	var unknown pkgStatus = 99
+	if got := unknown.label(); got != "unknown" {
+		t.Errorf("expected 'unknown' for unknown pkgStatus, got %q", got)
+	}
+}
+
+// ── seedToggles ───────────────────────────────────────────────────────────────
+
+func TestSeedToggles_TiedIsTrue(t *testing.T) {
+	rows := []pkgRow{
+		{name: "nvim", status: statusTied},
+	}
+	toggles := seedToggles(rows)
+	if !toggles["nvim"] {
+		t.Error("expected tied package to have toggle=true")
+	}
+}
+
+func TestSeedToggles_UntiedIsFalse(t *testing.T) {
+	rows := []pkgRow{
+		{name: "zsh", status: statusUntied},
+	}
+	toggles := seedToggles(rows)
+	if toggles["zsh"] {
+		t.Error("expected untied package to have toggle=false")
+	}
+}
+
+func TestSeedToggles_PartialIsTrue(t *testing.T) {
+	rows := []pkgRow{
+		{name: "git", status: statusPartial},
+	}
+	toggles := seedToggles(rows)
+	if !toggles["git"] {
+		t.Error("expected partial package to have toggle=true")
+	}
+}
+
+func TestSeedToggles_SkippedIsFalse(t *testing.T) {
+	rows := []pkgRow{
+		{name: "yabai", status: statusSkipped},
+	}
+	toggles := seedToggles(rows)
+	if toggles["yabai"] {
+		t.Error("expected skipped package to have toggle=false")
+	}
+}
+
+func TestSeedToggles_MultiplePackages(t *testing.T) {
+	rows := []pkgRow{
+		{name: "nvim", status: statusTied},
+		{name: "zsh", status: statusUntied},
+		{name: "git", status: statusPartial},
+	}
+	toggles := seedToggles(rows)
+	if !toggles["nvim"] {
+		t.Error("nvim should be true (tied)")
+	}
+	if toggles["zsh"] {
+		t.Error("zsh should be false (untied)")
+	}
+	if !toggles["git"] {
+		t.Error("git should be true (partial)")
+	}
+}
+
+// ── isPending ─────────────────────────────────────────────────────────────────
+
+func TestIsPending_TiedWantsTied(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"nvim": true},
+	}
+	row := pkgRow{name: "nvim", status: statusTied}
+	if m.isPending(row) {
+		t.Error("tied package with toggle=true should not be pending")
+	}
+}
+
+func TestIsPending_TiedWantsUntied(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"nvim": false},
+	}
+	row := pkgRow{name: "nvim", status: statusTied}
+	if !m.isPending(row) {
+		t.Error("tied package with toggle=false should be pending")
+	}
+}
+
+func TestIsPending_UntiedWantsUntied(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"zsh": false},
+	}
+	row := pkgRow{name: "zsh", status: statusUntied}
+	if m.isPending(row) {
+		t.Error("untied package with toggle=false should not be pending")
+	}
+}
+
+func TestIsPending_UntiedWantsTied(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"zsh": true},
+	}
+	row := pkgRow{name: "zsh", status: statusUntied}
+	if !m.isPending(row) {
+		t.Error("untied package with toggle=true should be pending")
+	}
+}
+
+func TestIsPending_PartialCounts(t *testing.T) {
+	m := &model{
+		toggles: map[string]bool{"git": false},
+	}
+	row := pkgRow{name: "git", status: statusPartial}
+	// partial is treated as "tied" for isPending comparison
+	if !m.isPending(row) {
+		t.Error("partial package with toggle=false should be pending")
+	}
+}
+
+// ── pendingCount ──────────────────────────────────────────────────────────────
+
+func TestPendingCount_None(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusTied},
+			{name: "zsh", status: statusUntied},
+		},
+		toggles: map[string]bool{
+			"nvim": true,
+			"zsh":  false,
+		},
+	}
+	if n := m.pendingCount(); n != 0 {
+		t.Errorf("expected 0 pending, got %d", n)
+	}
+}
+
+func TestPendingCount_One(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusTied},
+			{name: "zsh", status: statusUntied},
+		},
+		toggles: map[string]bool{
+			"nvim": false, // pending change
+			"zsh":  false,
+		},
+	}
+	if n := m.pendingCount(); n != 1 {
+		t.Errorf("expected 1 pending, got %d", n)
+	}
+}
+
+func TestPendingCount_All(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusTied},
+			{name: "zsh", status: statusUntied},
+		},
+		toggles: map[string]bool{
+			"nvim": false, // pending
+			"zsh":  true,  // pending
+		},
+	}
+	if n := m.pendingCount(); n != 2 {
+		t.Errorf("expected 2 pending, got %d", n)
+	}
+}
+
+// ── togglePackage ─────────────────────────────────────────────────────────────
+
+func TestTogglePackage_Normal(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusUntied},
+		},
+		toggles: map[string]bool{"nvim": false},
+	}
+	m.togglePackage(0)
+	if !m.toggles["nvim"] {
+		t.Error("toggle should flip false -> true")
+	}
+	m.togglePackage(0)
+	if m.toggles["nvim"] {
+		t.Error("toggle should flip true -> false")
+	}
+}
+
+func TestTogglePackage_SkippedIsNoop(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "yabai", status: statusSkipped},
+		},
+		toggles: map[string]bool{"yabai": false},
+	}
+	m.togglePackage(0)
+	if m.toggles["yabai"] {
+		t.Error("toggling skipped package should be a no-op")
+	}
+}
+
+func TestTogglePackage_ConflictIsNoop(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusConflict},
+		},
+		toggles: map[string]bool{"nvim": false},
+	}
+	m.togglePackage(0)
+	if m.toggles["nvim"] {
+		t.Error("toggling conflict package should be a no-op")
+	}
+}
+
+// ── listHeaderLines ───────────────────────────────────────────────────────────
+
+func TestListHeaderLines_WithBranch(t *testing.T) {
+	m := &model{gitBranch: "main"}
+	if got := m.listHeaderLines(); got != 3 {
+		t.Errorf("expected 3 header lines with git branch, got %d", got)
+	}
+}
+
+func TestListHeaderLines_WithoutBranch(t *testing.T) {
+	m := &model{}
+	if got := m.listHeaderLines(); got != 2 {
+		t.Errorf("expected 2 header lines without git branch, got %d", got)
+	}
+}
+
+// ── visibleHeight ─────────────────────────────────────────────────────────────
+
+func TestVisibleHeight_Normal(t *testing.T) {
+	m := &model{height: 20}
+	// overhead = 2 (no branch) + 3 = 5; visible = 20 - 5 = 15
+	if got := m.visibleHeight(); got != 15 {
+		t.Errorf("expected 15 visible rows, got %d", got)
+	}
+}
+
+func TestVisibleHeight_Minimum(t *testing.T) {
+	m := &model{height: 1}
+	if got := m.visibleHeight(); got < 1 {
+		t.Errorf("visibleHeight should be at least 1, got %d", got)
+	}
+}
+
+func TestVisibleHeight_WithBranch(t *testing.T) {
+	m := &model{height: 20, gitBranch: "main"}
+	// overhead = 3 (with branch) + 3 = 6; visible = 20 - 6 = 14
+	if got := m.visibleHeight(); got != 14 {
+		t.Errorf("expected 14 visible rows with git branch, got %d", got)
+	}
+}
+
+// ── adjustOffset ──────────────────────────────────────────────────────────────
+
+func TestAdjustOffset_CursorAboveView(t *testing.T) {
+	m := &model{
+		height: 20,
+		cursor: 0,
+		offset: 5,
+	}
+	m.adjustOffset()
+	if m.offset != 0 {
+		t.Errorf("expected offset to move to cursor (0), got %d", m.offset)
+	}
+}
+
+func TestAdjustOffset_CursorBelowView(t *testing.T) {
+	m := &model{
+		height: 10,
+		cursor: 10,
+		offset: 0,
+		rows:   make([]pkgRow, 15),
+	}
+	visH := m.visibleHeight()
+	m.adjustOffset()
+	expected := 10 - visH + 1
+	if m.offset != expected {
+		t.Errorf("expected offset %d, got %d", expected, m.offset)
+	}
+}
+
+func TestAdjustOffset_CursorInView(t *testing.T) {
+	m := &model{
+		height: 20,
+		cursor: 3,
+		offset: 0,
+	}
+	m.adjustOffset()
+	if m.offset != 0 {
+		t.Error("offset should not change when cursor is already in view")
+	}
+}
+
+// ── branchVisibleHeight ───────────────────────────────────────────────────────
+
+func TestBranchVisibleHeight_Normal(t *testing.T) {
+	m := &model{height: 20}
+	// overhead = 4; visible = 16
+	if got := m.branchVisibleHeight(); got != 16 {
+		t.Errorf("expected 16, got %d", got)
+	}
+}
+
+func TestBranchVisibleHeight_Minimum(t *testing.T) {
+	m := &model{height: 1}
+	if got := m.branchVisibleHeight(); got < 1 {
+		t.Errorf("branchVisibleHeight should be at least 1, got %d", got)
+	}
+}
+
+// ── adjustBranchOffset ────────────────────────────────────────────────────────
+
+func TestAdjustBranchOffset_CursorAbove(t *testing.T) {
+	m := &model{
+		height:       20,
+		branchCursor: 0,
+		branchOffset: 3,
+	}
+	m.adjustBranchOffset()
+	if m.branchOffset != 0 {
+		t.Errorf("expected branchOffset 0, got %d", m.branchOffset)
+	}
+}
+
+func TestAdjustBranchOffset_CursorBelow(t *testing.T) {
+	m := &model{
+		height:       10,
+		branchCursor: 12,
+		branchOffset: 0,
+	}
+	vh := m.branchVisibleHeight()
+	m.adjustBranchOffset()
+	expected := 12 - vh + 1
+	if m.branchOffset != expected {
+		t.Errorf("expected branchOffset %d, got %d", expected, m.branchOffset)
+	}
+}
+
+// ── buildConfirmLines ─────────────────────────────────────────────────────────
+
+func TestBuildConfirmLines_TieAndUntie(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusUntied},
+			{name: "zsh", status: statusTied},
+			{name: "git", status: statusTied},
+		},
+		toggles: map[string]bool{
+			"nvim": true,  // want to tie — pending
+			"zsh":  false, // want to untie — pending
+			"git":  true,  // already tied — not pending
+		},
+	}
+	lines := m.buildConfirmLines()
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 confirm lines, got %d: %v", len(lines), lines)
+	}
+	foundTie, foundUntie := false, false
+	for _, l := range lines {
+		if containsSubstr(l, "tie") && containsSubstr(l, "nvim") {
+			foundTie = true
+		}
+		if containsSubstr(l, "untie") && containsSubstr(l, "zsh") {
+			foundUntie = true
+		}
+	}
+	if !foundTie {
+		t.Error("expected a 'tie nvim' line in confirm output")
+	}
+	if !foundUntie {
+		t.Error("expected an 'untie zsh' line in confirm output")
+	}
+}
+
+func TestBuildConfirmLines_NoPending(t *testing.T) {
+	m := &model{
+		rows: []pkgRow{
+			{name: "nvim", status: statusTied},
+		},
+		toggles: map[string]bool{"nvim": true},
+	}
+	if lines := m.buildConfirmLines(); len(lines) != 0 {
+		t.Errorf("expected 0 confirm lines when nothing pending, got %d", len(lines))
+	}
+}
+
+// ── dotfilesDir ───────────────────────────────────────────────────────────────
+
+func TestDotfilesDir(t *testing.T) {
+	got := dotfilesDir("/home/user/.dotfiles/Knotfile")
+	expected := "/home/user/.dotfiles"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+func TestDotfilesDir_Nested(t *testing.T) {
+	got := dotfilesDir("/a/b/c/Knotfile")
+	expected := "/a/b/c"
+	if got != expected {
+		t.Errorf("expected %q, got %q", expected, got)
+	}
+}
+
+// ── max / min ─────────────────────────────────────────────────────────────────
+
+func TestMax(t *testing.T) {
+	cases := []struct{ a, b, want int }{
+		{1, 2, 2},
+		{5, 3, 5},
+		{4, 4, 4},
+		{-1, -5, -1},
+	}
+	for _, c := range cases {
+		if got := max(c.a, c.b); got != c.want {
+			t.Errorf("max(%d, %d) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestMin(t *testing.T) {
+	cases := []struct{ a, b, want int }{
+		{1, 2, 1},
+		{5, 3, 3},
+		{4, 4, 4},
+		{-1, -5, -5},
+	}
+	for _, c := range cases {
+		if got := min(c.a, c.b); got != c.want {
+			t.Errorf("min(%d, %d) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// ── buildRows ─────────────────────────────────────────────────────────────────
+
+func makeTempPackage(t *testing.T, files map[string]string) (source, target string) {
+	t.Helper()
+	source = t.TempDir()
+	target = t.TempDir()
+	for rel, content := range files {
+		full := filepath.Join(source, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return
+}
+
+func newCmdTestLinker() *linker.Linker {
+	return &linker.Linker{
+		DryRun:  false,
+		HomeDir: "/home/testuser",
+		GOOS:    runtime.GOOS,
+		Writer:  &bytes.Buffer{},
+	}
+}
+
+func TestBuildRows_Basic(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"init.lua": "-- x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, err := buildRows(cfg, lnk)
+	if err != nil {
+		t.Fatalf("buildRows() error: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].name != "nvim" {
+		t.Errorf("expected row name 'nvim', got %q", rows[0].name)
+	}
+}
+
+func TestBuildRows_Sorted(t *testing.T) {
+	sourceA, targetA := makeTempPackage(t, map[string]string{"f": "x"})
+	sourceB, targetB := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"zsh":  {Source: sourceA, Target: targetA},
+			"nvim": {Source: sourceB, Target: targetB},
+		},
+	}
+	rows, err := buildRows(cfg, lnk)
+	if err != nil {
+		t.Fatalf("buildRows() error: %v", err)
+	}
+	if len(rows) != 2 || rows[0].name != "nvim" || rows[1].name != "zsh" {
+		t.Errorf("expected sorted rows [nvim, zsh], got %v", rows)
+	}
+}
+
+// ── view methods ──────────────────────────────────────────────────────────────
+
+func baseModel(t *testing.T) model {
+	t.Helper()
+	source, target := makeTempPackage(t, map[string]string{"f.lua": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, err := buildRows(cfg, lnk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(source, "Knotfile")
+	return model{
+		cfg:     cfg,
+		cfgPath: cfgPath,
+		lnk:     lnk,
+		rows:    rows,
+		toggles: seedToggles(rows),
+		phase:   phaseList,
+		width:   80,
+		height:  24,
+	}
+}
+
+func TestViewList_NonEmpty(t *testing.T) {
+	m := baseModel(t)
+	out := m.viewList()
+	if out == "" {
+		t.Error("viewList() returned empty string")
+	}
+	if !containsSubstr(out, "knot") {
+		t.Error("viewList() should contain 'knot' header")
+	}
+}
+
+func TestViewList_WithGitBranch(t *testing.T) {
+	m := baseModel(t)
+	m.gitBranch = "main"
+	m.gitSHA = "abc1234"
+	m.gitCommitMsg = "initial commit"
+	out := m.viewList()
+	if !containsSubstr(out, "main") {
+		t.Errorf("viewList() should show git branch, got:\n%s", out)
+	}
+}
+
+func TestViewList_NoRows(t *testing.T) {
+	m := model{
+		cfg:     &config.Config{Packages: map[string]config.Package{}},
+		rows:    nil,
+		toggles: map[string]bool{},
+		phase:   phaseList,
+		width:   80,
+		height:  24,
+		cfgPath: "/tmp/Knotfile",
+	}
+	out := m.viewList()
+	if !containsSubstr(out, "No packages") {
+		t.Errorf("expected 'No packages' message, got:\n%s", out)
+	}
+}
+
+func TestViewList_StatusMsg(t *testing.T) {
+	m := baseModel(t)
+	m.statusMsg = "some editor error"
+	out := m.viewList()
+	if !containsSubstr(out, "some editor error") {
+		t.Errorf("viewList() should show statusMsg, got:\n%s", out)
+	}
+}
+
+func TestViewList_PendingChanges(t *testing.T) {
+	m := baseModel(t)
+	// make nvim pending by flipping its toggle
+	m.toggles["nvim"] = !m.toggles["nvim"]
+	out := m.viewList()
+	if !containsSubstr(out, "pending") {
+		t.Errorf("viewList() should show pending changes message, got:\n%s", out)
+	}
+}
+
+func TestViewConfirm_Lines(t *testing.T) {
+	m := baseModel(t)
+	m.confirmLines = []string{"  tie   nvim", "  untie zsh"}
+	out := m.viewConfirm()
+	if !containsSubstr(out, "nvim") {
+		t.Errorf("viewConfirm() should show package names, got:\n%s", out)
+	}
+	if !containsSubstr(out, "Apply?") {
+		t.Errorf("viewConfirm() should show Apply? prompt, got:\n%s", out)
+	}
+}
+
+func TestViewResult_Success(t *testing.T) {
+	m := baseModel(t)
+	m.applyLog = []string{"linked /home/user/.config/nvim/init.lua"}
+	out := m.viewResult()
+	if !containsSubstr(out, "Done") {
+		t.Errorf("viewResult() should show Done on success, got:\n%s", out)
+	}
+}
+
+func TestViewResult_Error(t *testing.T) {
+	m := baseModel(t)
+	m.applyErr = errors.New("something went wrong")
+	out := m.viewResult()
+	if !containsSubstr(out, "Error") {
+		t.Errorf("viewResult() should show Error on failure, got:\n%s", out)
+	}
+}
+
+func TestViewBranch_WithBranches(t *testing.T) {
+	m := baseModel(t)
+	m.branches = []string{"main", "feature/x"}
+	m.gitBranch = "main"
+	m.branchCursor = 0
+	out := m.viewBranch()
+	if !containsSubstr(out, "main") {
+		t.Errorf("viewBranch() should show branches, got:\n%s", out)
+	}
+}
+
+func TestViewBranch_NoBranches(t *testing.T) {
+	m := baseModel(t)
+	out := m.viewBranch()
+	if !containsSubstr(out, "No branches") {
+		t.Errorf("viewBranch() with no branches should say 'No branches', got:\n%s", out)
+	}
+}
+
+func TestView_AllPhases(t *testing.T) {
+	phases := []tuiPhase{phaseList, phaseConfirm, phaseApply, phaseResult, phaseGitPull, phaseBranch, phaseCheckout}
+	for _, phase := range phases {
+		m := baseModel(t)
+		m.phase = phase
+		out := m.View()
+		if out == "" {
+			t.Errorf("View() returned empty string for phase %d", phase)
+		}
+	}
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+func TestInit_ReturnsCmd(t *testing.T) {
+	m := baseModel(t)
+	cmd := m.Init()
+	// Init returns a tea.Cmd (function). It should be non-nil.
+	if cmd == nil {
+		t.Error("Init() should return a non-nil tea.Cmd")
+	}
+}
+
+// ── updateList ────────────────────────────────────────────────────────────────
+
+func keyMsg(key string) tea.KeyMsg {
+	switch key {
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
+	case "enter":
+		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "esc":
+		return tea.KeyMsg{Type: tea.KeyEsc}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
+	default:
+		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(key)}
+	}
+}
+
+func TestUpdateList_NavigateDown(t *testing.T) {
+	source1, target1 := makeTempPackage(t, map[string]string{"f": "x"})
+	source2, target2 := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source1, Target: target1},
+			"zsh":  {Source: source2, Target: target2},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg:     cfg,
+		cfgPath: "/tmp/Knotfile",
+		lnk:     lnk,
+		rows:    rows,
+		toggles: seedToggles(rows),
+		cursor:  0,
+		phase:   phaseList,
+		height:  24,
+		width:   80,
+	}
+	result, _ := m.updateList(keyMsg("j"))
+	newM := result.(model)
+	if newM.cursor != 1 {
+		t.Errorf("expected cursor=1 after 'j', got %d", newM.cursor)
+	}
+}
+
+func TestUpdateList_NavigateUp(t *testing.T) {
+	source1, target1 := makeTempPackage(t, map[string]string{"f": "x"})
+	source2, target2 := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source1, Target: target1},
+			"zsh":  {Source: source2, Target: target2},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg:     cfg,
+		cfgPath: "/tmp/Knotfile",
+		lnk:     lnk,
+		rows:    rows,
+		toggles: seedToggles(rows),
+		cursor:  1,
+		phase:   phaseList,
+		height:  24,
+		width:   80,
+	}
+	result, _ := m.updateList(keyMsg("k"))
+	newM := result.(model)
+	if newM.cursor != 0 {
+		t.Errorf("expected cursor=0 after 'k', got %d", newM.cursor)
+	}
+}
+
+func TestUpdateList_NavigateAtBoundaries(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg: cfg, cfgPath: "/tmp/Knotfile", lnk: lnk, rows: rows,
+		toggles: seedToggles(rows), cursor: 0, phase: phaseList, height: 24, width: 80,
+	}
+	// Can't go up from 0
+	result, _ := m.updateList(keyMsg("k"))
+	if result.(model).cursor != 0 {
+		t.Error("cursor should stay at 0 when already at top")
+	}
+
+	m.cursor = 0
+	// Can't go down past last
+	result, _ = m.updateList(keyMsg("j"))
+	if result.(model).cursor != 0 {
+		t.Error("cursor should stay at 0 with only 1 row")
+	}
+}
+
+func TestUpdateList_Toggle(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	initial := seedToggles(rows)["nvim"]
+	m := model{
+		cfg: cfg, cfgPath: "/tmp/Knotfile", lnk: lnk, rows: rows,
+		toggles: seedToggles(rows), cursor: 0, phase: phaseList, height: 24, width: 80,
+	}
+	result, _ := m.updateList(keyMsg(" "))
+	if result.(model).toggles["nvim"] == initial {
+		t.Error("space should toggle the package")
+	}
+}
+
+func TestUpdateList_ApplyNoPending(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg: cfg, cfgPath: "/tmp/Knotfile", lnk: lnk, rows: rows,
+		toggles: seedToggles(rows), phase: phaseList, height: 24, width: 80,
+	}
+	// 'a' with no pending changes should do nothing
+	result, _ := m.updateList(keyMsg("a"))
+	if result.(model).phase != phaseList {
+		t.Error("'a' with no pending changes should keep phase as phaseList")
+	}
+}
+
+func TestUpdateList_ApplyWithPending(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	// Flip toggle to create pending change
+	toggles := seedToggles(rows)
+	toggles["nvim"] = !toggles["nvim"]
+	m := model{
+		cfg: cfg, cfgPath: "/tmp/Knotfile", lnk: lnk, rows: rows,
+		toggles: toggles, phase: phaseList, height: 24, width: 80,
+	}
+	result, _ := m.updateList(keyMsg("a"))
+	if result.(model).phase != phaseConfirm {
+		t.Errorf("'a' with pending changes should move to phaseConfirm, got %v", result.(model).phase)
+	}
+}
+
+func TestUpdateList_Quit(t *testing.T) {
+	m := model{phase: phaseList, rows: []pkgRow{}, toggles: map[string]bool{}}
+	_, cmd := m.updateList(keyMsg("q"))
+	if cmd == nil {
+		t.Error("'q' should return a quit command")
+	}
+}
+
+// ── updateConfirm ─────────────────────────────────────────────────────────────
+
+func TestUpdateConfirm_Yes(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	m := model{
+		cfg:     cfg,
+		cfgPath: "/tmp/Knotfile",
+		lnk:     lnk,
+		rows:    rows,
+		toggles: seedToggles(rows),
+		phase:   phaseConfirm,
+		height:  24,
+		width:   80,
+	}
+	result, cmd := m.updateConfirm(keyMsg("y"))
+	newM := result.(model)
+	if newM.phase != phaseApply {
+		t.Errorf("'y' should move to phaseApply, got %v", newM.phase)
+	}
+	if cmd == nil {
+		t.Error("'y' should return an apply command")
+	}
+}
+
+func TestUpdateConfirm_No(t *testing.T) {
+	m := model{
+		phase: phaseConfirm, confirmLines: []string{"line"},
+		rows: []pkgRow{}, toggles: map[string]bool{},
+	}
+	result, _ := m.updateConfirm(keyMsg("n"))
+	newM := result.(model)
+	if newM.phase != phaseList {
+		t.Errorf("'n' should return to phaseList, got %v", newM.phase)
+	}
+	if len(newM.confirmLines) != 0 {
+		t.Error("'n' should clear confirmLines")
+	}
+}
+
+func TestUpdateConfirm_Esc(t *testing.T) {
+	m := model{phase: phaseConfirm, rows: []pkgRow{}, toggles: map[string]bool{}}
+	result, _ := m.updateConfirm(keyMsg("esc"))
+	if result.(model).phase != phaseList {
+		t.Error("esc should return to phaseList")
+	}
+}
+
+// ── updateBranch ──────────────────────────────────────────────────────────────
+
+func TestUpdateBranch_NavigateDown(t *testing.T) {
+	m := model{
+		branches:     []string{"main", "dev"},
+		branchCursor: 0,
+		phase:        phaseBranch,
+		height:       24,
+		width:        80,
+	}
+	result, _ := m.updateBranch(keyMsg("j"))
+	if result.(model).branchCursor != 1 {
+		t.Error("'j' should move branchCursor down")
+	}
+}
+
+func TestUpdateBranch_NavigateUp(t *testing.T) {
+	m := model{
+		branches:     []string{"main", "dev"},
+		branchCursor: 1,
+		phase:        phaseBranch,
+		height:       24,
+		width:        80,
+	}
+	result, _ := m.updateBranch(keyMsg("k"))
+	if result.(model).branchCursor != 0 {
+		t.Error("'k' should move branchCursor up")
+	}
+}
+
+func TestUpdateBranch_Esc(t *testing.T) {
+	m := model{branches: []string{"main"}, phase: phaseBranch}
+	result, _ := m.updateBranch(keyMsg("esc"))
+	if result.(model).phase != phaseList {
+		t.Error("esc in branch view should go back to phaseList")
+	}
+}
+
+func TestUpdateBranch_EnterCurrentBranch(t *testing.T) {
+	m := model{
+		branches:     []string{"main", "dev"},
+		branchCursor: 0,
+		gitBranch:    "main",
+		phase:        phaseBranch,
+	}
+	result, _ := m.updateBranch(keyMsg("enter"))
+	if result.(model).phase != phaseList {
+		t.Error("enter on current branch should stay at phaseList")
+	}
+}
+
+func TestUpdateBranch_EnterOtherBranch(t *testing.T) {
+	m := model{
+		branches:     []string{"main", "dev"},
+		branchCursor: 1,
+		gitBranch:    "main",
+		phase:        phaseBranch,
+		cfgPath:      "/tmp/Knotfile",
+	}
+	result, cmd := m.updateBranch(keyMsg("enter"))
+	newM := result.(model)
+	if newM.phase != phaseCheckout {
+		t.Errorf("enter on different branch should move to phaseCheckout, got %v", newM.phase)
+	}
+	if cmd == nil {
+		t.Error("entering a different branch should return a checkout command")
+	}
+}
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+func TestUpdate_WindowSizeMsg(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	newM := result.(model)
+	if newM.width != 120 || newM.height != 40 {
+		t.Errorf("WindowSizeMsg should update dimensions, got %dx%d", newM.width, newM.height)
+	}
+}
+
+func TestUpdate_GitInfoMsg_Success(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(gitInfoMsg{branch: "main", sha: "abc", msg: "commit"})
+	newM := result.(model)
+	if newM.gitBranch != "main" || newM.gitSHA != "abc" {
+		t.Error("gitInfoMsg should update git info")
+	}
+}
+
+func TestUpdate_GitInfoMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	m.gitBranch = "existing"
+	result, _ := m.Update(gitInfoMsg{err: errors.New("no git")})
+	newM := result.(model)
+	// git branch should be unchanged on error
+	if newM.gitBranch != "existing" {
+		t.Error("gitInfoMsg with error should not clear existing git info")
+	}
+}
+
+func TestUpdate_ReloadMsg_Success(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f": "x"})
+	lnk := newCmdTestLinker()
+	newCfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(newCfg, lnk)
+	m := baseModel(t)
+	result, _ := m.Update(reloadMsg{cfg: newCfg, rows: rows})
+	newM := result.(model)
+	if newM.phase != phaseList {
+		t.Errorf("reloadMsg success should set phase to phaseList, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_ReloadMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(reloadMsg{err: errors.New("load failed")})
+	newM := result.(model)
+	if newM.phase != phaseResult {
+		t.Errorf("reloadMsg error should set phase to phaseResult, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_ApplyDoneMsg(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(applyDoneMsg{log: []string{"linked /x"}, err: nil})
+	newM := result.(model)
+	if newM.phase != phaseResult {
+		t.Errorf("applyDoneMsg should set phase to phaseResult, got %v", newM.phase)
+	}
+	if len(newM.applyLog) != 1 {
+		t.Error("applyDoneMsg should set applyLog")
+	}
+}
+
+func TestUpdate_EditorDoneMsg_Success(t *testing.T) {
+	m := baseModel(t)
+	result, cmd := m.Update(editorDoneMsg{err: nil})
+	newM := result.(model)
+	if newM.statusMsg != "" {
+		t.Error("editorDoneMsg success should clear statusMsg")
+	}
+	if cmd == nil {
+		t.Error("editorDoneMsg success should return a reload command")
+	}
+}
+
+func TestUpdate_EditorDoneMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(editorDoneMsg{err: errors.New("editor failed")})
+	newM := result.(model)
+	if newM.statusMsg == "" {
+		t.Error("editorDoneMsg error should set statusMsg")
+	}
+	if newM.phase != phaseList {
+		t.Errorf("editorDoneMsg error should keep phaseList, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_BranchListMsg_Success(t *testing.T) {
+	m := baseModel(t)
+	m.gitBranch = "main"
+	result, _ := m.Update(branchListMsg{branches: []string{"main", "dev"}})
+	newM := result.(model)
+	if newM.phase != phaseBranch {
+		t.Errorf("branchListMsg should move to phaseBranch, got %v", newM.phase)
+	}
+	if len(newM.branches) != 2 {
+		t.Error("branchListMsg should set branches")
+	}
+	// Cursor should be set to current branch index
+	if newM.branchCursor != 0 {
+		t.Errorf("branchCursor should point to current branch (main at 0), got %d", newM.branchCursor)
+	}
+}
+
+func TestUpdate_BranchListMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(branchListMsg{err: errors.New("no git")})
+	newM := result.(model)
+	if newM.statusMsg == "" {
+		t.Error("branchListMsg error should set statusMsg")
+	}
+}
+
+func TestUpdate_GitPullResultMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(gitPullResultMsg{output: "conflict", err: errors.New("pull failed")})
+	newM := result.(model)
+	if newM.phase != phaseResult {
+		t.Errorf("gitPullResultMsg error should set phaseResult, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_GitPullResultMsg_Success(t *testing.T) {
+	m := baseModel(t)
+	m.cfgPath = "/tmp/Knotfile"
+	result, cmd := m.Update(gitPullResultMsg{output: "up to date", err: nil})
+	_ = result
+	if cmd == nil {
+		t.Error("gitPullResultMsg success should return a reload+fetch command")
+	}
+}
+
+func TestUpdate_CheckoutDoneMsg_Error(t *testing.T) {
+	m := baseModel(t)
+	result, _ := m.Update(checkoutDoneMsg{output: "error", err: errors.New("checkout failed")})
+	newM := result.(model)
+	if newM.phase != phaseResult {
+		t.Errorf("checkoutDoneMsg error should set phaseResult, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_CheckoutDoneMsg_Success(t *testing.T) {
+	m := baseModel(t)
+	m.cfgPath = "/tmp/Knotfile"
+	result, cmd := m.Update(checkoutDoneMsg{output: "switched", err: nil})
+	_ = result
+	if cmd == nil {
+		t.Error("checkoutDoneMsg success should return reload+fetch command")
+	}
+}
+
+func TestUpdate_PhaseResult_AnyKey(t *testing.T) {
+	m := baseModel(t)
+	m.phase = phaseResult
+	m.applyLog = []string{"done"}
+	m.applyErr = nil
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	newM := result.(model)
+	if newM.phase != phaseList {
+		t.Errorf("any key in phaseResult should return to phaseList, got %v", newM.phase)
+	}
+}
+
+func TestUpdate_PhaseApply_CtrlC(t *testing.T) {
+	m := baseModel(t)
+	m.phase = phaseApply
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("ctrl+c in phaseApply should return quit command")
+	}
+}
+
+// ── reloadCmd ─────────────────────────────────────────────────────────────────
+
+func makeTempKnotfile(t *testing.T) (cfgPath string) {
+	t.Helper()
+	source, target := makeTempPackage(t, map[string]string{"f.lua": "x"})
+	dir := t.TempDir()
+	cfgPath = filepath.Join(dir, "Knotfile")
+	content := fmt.Sprintf(`packages:
+  nvim:
+    source: %s
+    target: %s
+`, source, target)
+	if err := os.WriteFile(cfgPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	return cfgPath
+}
+
+func TestReloadCmd_Success(t *testing.T) {
+	cfgPath := makeTempKnotfile(t)
+	lnk := newCmdTestLinker()
+	cmd := reloadCmd(cfgPath, lnk)
+	msg := cmd()
+	reload, ok := msg.(reloadMsg)
+	if !ok {
+		t.Fatalf("expected reloadMsg, got %T", msg)
+	}
+	if reload.err != nil {
+		t.Errorf("reloadCmd() error: %v", reload.err)
+	}
+	if len(reload.rows) != 1 {
+		t.Errorf("expected 1 row, got %d", len(reload.rows))
+	}
+}
+
+func TestReloadCmd_BadPath(t *testing.T) {
+	lnk := newCmdTestLinker()
+	cmd := reloadCmd("/nonexistent/path/Knotfile", lnk)
+	msg := cmd()
+	reload, ok := msg.(reloadMsg)
+	if !ok {
+		t.Fatalf("expected reloadMsg, got %T", msg)
+	}
+	if reload.err == nil {
+		t.Error("reloadCmd with bad path should return error")
+	}
+}
+
+// ── applyCmd ──────────────────────────────────────────────────────────────────
+
+func TestApplyCmd_TiePackage(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f.lua": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	// Currently untied, toggle to tie
+	toggles := map[string]bool{"nvim": true}
+
+	cmd := applyCmd(cfg, lnk, rows, toggles)
+	msg := cmd()
+	done, ok := msg.(applyDoneMsg)
+	if !ok {
+		t.Fatalf("expected applyDoneMsg, got %T", msg)
+	}
+	if done.err != nil {
+		t.Errorf("applyCmd error: %v", done.err)
+	}
+}
+
+func TestApplyCmd_NoPendingChanges(t *testing.T) {
+	source, target := makeTempPackage(t, map[string]string{"f.lua": "x"})
+	lnk := newCmdTestLinker()
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+	rows, _ := buildRows(cfg, lnk)
+	// Status is untied, toggle is false — no change needed
+	toggles := map[string]bool{"nvim": false}
+
+	cmd := applyCmd(cfg, lnk, rows, toggles)
+	msg := cmd()
+	done, ok := msg.(applyDoneMsg)
+	if !ok {
+		t.Fatalf("expected applyDoneMsg, got %T", msg)
+	}
+	if len(done.log) != 0 {
+		t.Error("expected empty log when nothing to apply")
+	}
+}
+
+// ── helpers ───────────────────────────────────────────────────────────────────
+
+func containsSubstr(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

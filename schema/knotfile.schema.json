@@ -19,12 +19,12 @@
     "package": {
       "type": "object",
       "description": "A dotfile package: a source directory whose files are symlinked into a target directory.",
-      "required": ["source", "target"],
+      "required": ["target"],
       "additionalProperties": false,
       "properties": {
         "source": {
           "type": "string",
-          "description": "Path to the source directory containing dotfiles. Relative paths are resolved from the Knotfile's directory. Supports ~ expansion (e.g. ~/dotfiles/nvim)."
+          "description": "Path to the source directory containing dotfiles. Defaults to ./<package-name> relative to the Knotfile if omitted. Relative paths are resolved from the Knotfile's directory. Supports ~ expansion (e.g. ~/dotfiles/nvim)."
         },
         "target": {
           "type": "string",

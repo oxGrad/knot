@@ -9,14 +9,14 @@
 packages:
 
   # Neovim configuration
+  # `source` is omitted — defaults to ./nvim (relative to this Knotfile)
   nvim:
-    source: ./nvim                # relative to this Knotfile
     target: ~/.config/nvim
     ignore:
       - "*.log"
       - ".DS_Store"
 
-  # Zsh configuration
+  # Zsh configuration — explicit source
   zsh:
     source: ./zsh
     target: ~/
@@ -24,8 +24,8 @@ packages:
       - "README.md"
 
   # macOS-only: yabai window manager
+  # `source` is omitted — defaults to ./yabai
   yabai:
-    source: ./yabai
     target: ~/.config/yabai
     condition:
       os: darwin                  # darwin | linux | windows | freebsd
