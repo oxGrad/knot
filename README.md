@@ -2,6 +2,7 @@
 
 **A lightweight, configurable dotfiles manager.**
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/oxGrad/knot)](https://goreportcard.com/report/github.com/oxGrad/knot)
 [![CI](https://github.com/oxGrad/knot/actions/workflows/ci.yml/badge.svg)](https://github.com/oxGrad/knot/actions/workflows/ci.yml)
 [![Release](https://github.com/oxGrad/knot/actions/workflows/release.yml/badge.svg)](https://github.com/oxGrad/knot/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
