@@ -15,8 +15,10 @@
 - **Configurable Routing:** Map any file in your dotfiles repo to any location on your system
 - **Ignore Rules:** Exclude specific files (e.g. `README.md`, `.DS_Store`) per package
 - **OS Conditions:** Conditionally tie packages based on the operating system (macOS vs Linux)
+- **Tags:** Group packages with `tags: [work, linux]` and bulk-operate with `--tag <name>`
 - **Safe by Default:** `knot plan` previews every change before anything is written
 - **Validation:** `knot validate` checks your Knotfile for errors before you run anything
+- **Interactive TUI:** Run `knot` with no arguments for a live package/tags dashboard
 
 ## 🚀 Installation
 
@@ -52,10 +54,10 @@ Create a file named exactly `Knotfile` (no extension) at the root of your dotfil
 
 ```yaml
 packages:
-  # A simple 1-to-1 mapping
+  # source defaults to ./nvim when omitted
   nvim:
     target: ~/.config/nvim
-    source: ./nvim
+    tags: [work]
     ignore:
       - "README.md"
       - ".DS_Store"
@@ -64,22 +66,28 @@ packages:
   zsh:
     target: ~/
     source: ./zsh
+    tags: [home]
 
-  # OS-specific package — only tied on macOS
+  # OS-specific package — only tied on macOS; belongs to two tags
   yabai:
     target: ~/.config/yabai
-    source: ./yabai
+    tags: [home, macos]
     condition:
       os: darwin
+
+  # Untagged — still usable by name
+  secrets:
+    target: ~/.ssh
 ```
 
 ### Knotfile fields
 
 | Field | Required | Description |
 |---|---|---|
-| `source` | ✅ | Path to source directory (relative to `Knotfile`, or absolute; `~` supported) |
+| `source` | — | Path to source directory (relative to `Knotfile`, or absolute; `~` supported). Defaults to `./<package-name>` |
 | `target` | ✅ | Destination directory where symlinks are created (`~` supported) |
 | `ignore` | — | List of glob patterns matched against file basenames |
+| `tags` | — | List of tag names; enables `--tag` flag and Tags tab in TUI |
 | `condition.os` | — | Only tie on this OS (`darwin`, `linux`, `windows`, `freebsd`) |
 
 A [JSON Schema](schema/knotfile.schema.json) is available for editor validation and auto-complete — see [Editor Integration](#editor-integration).
@@ -87,11 +95,11 @@ A [JSON Schema](schema/knotfile.schema.json) is available for editor validation 
 ## 🛠️ CLI Reference
 
 ```
-knot tie [package...] [--all]   Create symlinks for one or more packages
-knot untie [package...]          Remove symlinks for one or more packages
-knot status                      Show current symlink state for all packages
-knot plan [package...] [--all]  Dry-run: preview what tie would do
-knot validate                    Validate the Knotfile for errors and warnings
+knot tie [package...] [--all] [--tag <name>]   Create symlinks
+knot untie [package...] [--all] [--tag <name>]  Remove symlinks
+knot status                                       Show symlink state
+knot plan [package...] [--all] [--tag <name>]   Dry-run preview
+knot validate                                     Validate Knotfile
 ```
 
 Global flags available on every command:
@@ -109,6 +117,7 @@ Warns on conflicts (target exists but is not the expected symlink) without overw
 ```bash
 knot tie nvim zsh        # tie specific packages
 knot tie --all           # tie every package in the Knotfile
+knot tie --tag work      # tie all packages tagged "work"
 knot tie nvim --dry-run  # preview without writing
 ```
 
@@ -118,6 +127,7 @@ Removes symlinks previously created by `knot tie`.
 
 ```bash
 knot untie nvim
+knot untie --tag home    # untie all packages tagged "home"
 ```
 
 ### `knot status`
@@ -155,6 +165,26 @@ knot validate
 ```
 
 Exit codes: `0` = valid · `1` = errors · `2` = warnings only
+
+### Interactive TUI
+
+Run `knot` with no arguments to launch the interactive TUI. It shows a live view of all packages and lets you toggle, apply, and reload without typing individual commands.
+
+The TUI has two tabs: **Packages** (the default) and **Tags**. Switch between them with `[` and `]`. The Tags tab shows packages grouped by tag in a collapsible tree view — press `enter` to collapse or expand a tag, and `space` to bulk-toggle all packages in a tag.
+
+Key bindings:
+
+| Key | Action |
+|---|---|
+| `↑`/`↓` or `j`/`k` | Navigate |
+| `space` | Toggle package / bulk-toggle tag |
+| `enter` | Collapse/expand tag (Tags tab) |
+| `[` / `]` | Switch tabs |
+| `a` | Apply pending changes |
+| `r` | `git pull` and reload |
+| `b` | Switch branch |
+| `e` | Open dotfiles dir in `$EDITOR` |
+| `q` | Quit |
 
 ## 🖥️ Editor Integration
 

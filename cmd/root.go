@@ -19,6 +19,7 @@ var rootCmd = &cobra.Command{
 	Long: `Knot manages your dotfiles via symlinks.
 It reads a Knotfile and creates or removes symlinks
 based on your package definitions.`,
+	RunE: runTUI,
 }
 
 // Execute runs the root command.
@@ -49,6 +50,17 @@ func loadConfig() (*config.Config, string, error) {
 	path := config.DefaultKnotfilePath(home)
 	cfg, err := config.Load(path)
 	return cfg, path, err
+}
+
+// resolveTagArg expands a tag name into the sorted list of package names that carry it.
+// Returns an error if the tag is not found in any package.
+func resolveTagArg(tag string, cfg *config.Config) ([]string, error) {
+	byTag := config.PackagesByTag(cfg)
+	names, ok := byTag[tag]
+	if !ok {
+		return nil, fmt.Errorf("unknown tag %q", tag)
+	}
+	return names, nil
 }
 
 // resolvePackageArgs returns the list of packages to operate on.

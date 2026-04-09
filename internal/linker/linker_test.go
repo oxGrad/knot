@@ -719,6 +719,207 @@ func TestPrintPlan_Output(t *testing.T) {
 	}
 }
 
+// TestOpType_String verifies all OpType string representations.
+func TestOpType_String(t *testing.T) {
+	cases := []struct {
+		op   OpType
+		want string
+	}{
+		{OpCreate, "create"},
+		{OpExists, "exists"},
+		{OpConflict, "conflict"},
+		{OpBroken, "broken"},
+		{OpRemove, "remove"},
+		{OpSkip, "skip"},
+		{OpType(99), "unknown"},
+	}
+	for _, c := range cases {
+		if got := c.op.String(); got != c.want {
+			t.Errorf("OpType(%d).String() = %q, want %q", c.op, got, c.want)
+		}
+	}
+}
+
+// TestNew verifies the New constructor sets sensible defaults.
+func TestNew(t *testing.T) {
+	l := New(true)
+	if l == nil {
+		t.Fatal("New() returned nil")
+	}
+	if !l.DryRun {
+		t.Error("expected DryRun=true")
+	}
+	if l.HomeDir == "" {
+		t.Error("expected HomeDir to be non-empty")
+	}
+	if l.GOOS == "" {
+		t.Error("expected GOOS to be non-empty")
+	}
+	if l.Writer == nil {
+		t.Error("expected Writer to be non-nil")
+	}
+}
+
+// TestPrintPlan_AllOps covers all OpType branches in PrintPlan.
+func TestPrintPlan_AllOps(t *testing.T) {
+	source := makePackageTree(t, map[string]string{"f.lua": "-- x"})
+	target := t.TempDir()
+
+	var buf bytes.Buffer
+	l := &Linker{Writer: &buf}
+
+	actions := []LinkAction{
+		{Op: OpCreate, Source: source, Target: filepath.Join(target, "create.lua")},
+		{Op: OpRemove, Target: filepath.Join(target, "remove.lua")},
+		{Op: OpExists, Target: filepath.Join(target, "exists.lua")},
+		{Op: OpConflict, Target: filepath.Join(target, "conflict.lua"), Reason: "some reason"},
+		{Op: OpBroken, Target: filepath.Join(target, "broken.lua")},
+		{Op: OpSkip, Target: filepath.Join(target, "skip.lua")},
+	}
+	l.PrintPlan(actions)
+
+	out := buf.String()
+	checks := []string{"+", "-", "=", "!", "~", "Plan:"}
+	for _, want := range checks {
+		if !containsString(out, want) {
+			t.Errorf("PrintPlan output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestPrintPlan_Summary verifies counts in the summary line.
+func TestPrintPlan_Summary(t *testing.T) {
+	var buf bytes.Buffer
+	l := &Linker{Writer: &buf}
+	l.PrintPlan([]LinkAction{
+		{Op: OpCreate},
+		{Op: OpCreate},
+		{Op: OpRemove},
+		{Op: OpExists},
+		{Op: OpConflict},
+	})
+	out := buf.String()
+	if !containsString(out, "2 to create") {
+		t.Errorf("expected '2 to create' in output:\n%s", out)
+	}
+	if !containsString(out, "1 to remove") {
+		t.Errorf("expected '1 to remove' in output:\n%s", out)
+	}
+}
+
+// TestStatus_ConflictAndBroken verifies Status reports conflict and broken lines.
+func TestStatus_ConflictAndBroken(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"conf.lua":  "-- config",
+		"other.lua": "-- other",
+	})
+	target := t.TempDir()
+
+	// Create a regular file at conf.lua (conflict).
+	conflictPath := filepath.Join(target, "conf.lua")
+	if err := os.WriteFile(conflictPath, []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a broken symlink at other.lua.
+	brokenPath := filepath.Join(target, "other.lua")
+	if err := os.Symlink("/nonexistent/path", brokenPath); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	l := &Linker{
+		DryRun:  false,
+		HomeDir: "/home/testuser",
+		GOOS:    "linux",
+		Writer:  &buf,
+	}
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+
+	if err := l.Status(cfg); err != nil {
+		t.Fatalf("Status() error: %v", err)
+	}
+	out := buf.String()
+	if !containsString(out, "[CONFLICT]") {
+		t.Errorf("expected [CONFLICT] in status output:\n%s", out)
+	}
+	if !containsString(out, "[BROKEN]") {
+		t.Errorf("expected [BROKEN] in status output:\n%s", out)
+	}
+}
+
+// TestApply_BrokenAndConflict verifies Apply outputs [BROKEN] and [CONFLICT] lines.
+func TestApply_BrokenAndConflict(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"conf.lua":  "-- config",
+		"other.lua": "-- other",
+	})
+	target := t.TempDir()
+
+	// Conflict: regular file exists.
+	if err := os.WriteFile(filepath.Join(target, "conf.lua"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Broken symlink.
+	if err := os.Symlink("/nonexistent", filepath.Join(target, "other.lua")); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	l := &Linker{
+		DryRun:  false,
+		HomeDir: "/home/testuser",
+		GOOS:    "linux",
+		Writer:  &buf,
+	}
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {Source: source, Target: target},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"nvim"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if err := l.Apply(actions); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+
+	out := buf.String()
+	if !containsString(out, "[CONFLICT]") {
+		t.Errorf("expected [CONFLICT] in apply output:\n%s", out)
+	}
+	if !containsString(out, "[BROKEN]") {
+		t.Errorf("expected [BROKEN] in apply output:\n%s", out)
+	}
+}
+
+// TestPlanPackage_SourceIsFile verifies an error when source is a file, not a dir.
+func TestPlanPackage_SourceIsFile(t *testing.T) {
+	// Write a regular file and use it as source.
+	f, err := os.CreateTemp(t.TempDir(), "source-*.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"bad": {Source: f.Name(), Target: t.TempDir()},
+		},
+	}
+	_, err = l.Plan(cfg, []string{"bad"})
+	if err == nil {
+		t.Error("expected error when source is a file, not a directory")
+	}
+}
+
 // containsString is a helper to avoid importing strings in test assertions.
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

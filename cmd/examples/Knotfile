@@ -2,30 +2,47 @@
 #
 # Each entry under `packages` defines a dotfile bundle to manage.
 # Run `knot tie --all` to create all symlinks.
+# Run `knot tie --tag work` to tie only packages tagged "work".
 # Run `knot status` to see what would change.
 #
 # Full reference: https://github.com/oxgrad/knot
 
 packages:
 
-  # Neovim configuration
+  # source defaults to ./nvim when omitted
   nvim:
-    source: ./nvim                # relative to this Knotfile
     target: ~/.config/nvim
+    tags: [work]
     ignore:
       - "*.log"
       - ".DS_Store"
 
-  # Zsh configuration
+  tmux:
+    target: ~/.config/tmux
+    tags: [work]
+
+  # Zsh configuration — explicit source, tagged home
   zsh:
     source: ./zsh
     target: ~/
+    tags: [home]
     ignore:
       - "README.md"
 
   # macOS-only: yabai window manager
   yabai:
-    source: ./yabai
     target: ~/.config/yabai
+    tags: [home]
     condition:
       os: darwin                  # darwin | linux | windows | freebsd
+
+  # Linux-only: i3 can belong to multiple tags
+  i3:
+    target: ~/.config/i3
+    tags: [home, linux]
+    condition:
+      os: linux
+
+  # untagged — still usable by name: knot tie secrets
+  secrets:
+    target: ~/.ssh
