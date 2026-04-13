@@ -1,0 +1,9 @@
+# knot validate exits 2 (non-zero) when there are only warnings.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/Knotfile --
+packages:
+
+! exec knot validate
+stdout 'no packages defined'
+stdout 'warning'

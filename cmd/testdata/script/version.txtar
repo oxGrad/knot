@@ -1,0 +1,3 @@
+# knot version prints "dev" for local builds.
+exec knot version
+stdout '^dev$'
