@@ -238,16 +238,16 @@ func (l *Linker) Apply(actions []LinkAction) error {
 				errs = append(errs, fmt.Errorf("remove %q: %w", a.Target, err))
 				continue
 			}
-			fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
 
 		case OpExists:
 			// no-op, already correctly linked
 
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
 
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "[BROKEN]   %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[BROKEN]   %s: %s\n", a.Target, a.Reason)
 
 		case OpSkip:
 			// silent skip
@@ -274,19 +274,19 @@ func (l *Linker) Status(cfg *config.Config) error {
 		counts[a.Op]++
 		switch a.Op {
 		case OpExists:
-			fmt.Fprintf(l.Writer, "[OK]       %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[OK]       %s\n", a.Target)
 		case OpCreate:
-			fmt.Fprintf(l.Writer, "[MISSING]  %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[MISSING]  %s\n", a.Target)
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "[BROKEN]   %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[BROKEN]   %s\n", a.Target)
 		case OpSkip:
 			// silent
 		}
 	}
 
-	fmt.Fprintf(l.Writer, "\n%d ok, %d missing, %d conflict, %d broken\n",
+	_, _ = fmt.Fprintf(l.Writer, "\n%d ok, %d missing, %d conflict, %d broken\n",
 		counts[OpExists], counts[OpCreate], counts[OpConflict], counts[OpBroken])
 	return nil
 }
@@ -298,20 +298,20 @@ func (l *Linker) PrintPlan(actions []LinkAction) {
 		counts[a.Op]++
 		switch a.Op {
 		case OpCreate:
-			fmt.Fprintf(l.Writer, "  + %s -> %s\n", a.Target, a.Source)
+			_, _ = fmt.Fprintf(l.Writer, "  + %s -> %s\n", a.Target, a.Source)
 		case OpRemove:
-			fmt.Fprintf(l.Writer, "  - %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  - %s\n", a.Target)
 		case OpExists:
-			fmt.Fprintf(l.Writer, "  = %s (already linked)\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  = %s (already linked)\n", a.Target)
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "  ! %s (conflict: %s)\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "  ! %s (conflict: %s)\n", a.Target, a.Reason)
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
 		case OpSkip:
 			// silent
 		}
 	}
 
-	fmt.Fprintf(l.Writer, "\nPlan: %d to create, %d to remove, %d already linked, %d conflicts\n",
+	_, _ = fmt.Fprintf(l.Writer, "\nPlan: %d to create, %d to remove, %d already linked, %d conflicts\n",
 		counts[OpCreate], counts[OpRemove], counts[OpExists], counts[OpConflict])
 }

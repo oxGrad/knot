@@ -1,7 +1,6 @@
 package cmd_test
 
 import (
-	"os"
 	"testing"
 
 	"github.com/oxgrad/knot/cmd"
@@ -9,12 +8,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"knot": func() int {
+	testscript.Main(m, map[string]func(){
+		"knot": func() {
 			cmd.Execute()
-			return 0
 		},
-	}))
+	})
 }
 
 func TestScript(t *testing.T) {
