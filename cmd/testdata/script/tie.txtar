@@ -21,4 +21,4 @@ exists $HOME/nvim-config/init.lua
 # Status now shows OK.
 exec knot status
 stdout '\[OK\]'
-stdout '2 ok, 0 missing'
+stdout '1 ok, 0 missing'

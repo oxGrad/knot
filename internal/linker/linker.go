@@ -94,7 +94,7 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 		source := resolver.ExpandPath(pkg.Source, l.HomeDir)
 		target := resolver.ExpandPath(pkg.Target, l.HomeDir)
 
-		pkgActions, err := l.planPackage(name, source, target, pkg.Ignore)
+		pkgActions, err := l.planPackage(name, source, target)
 		if err != nil {
 			return nil, fmt.Errorf("planning package %q: %w", name, err)
 		}
@@ -104,8 +104,9 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 	return actions, nil
 }
 
-// planPackage walks the source directory and computes link actions for each file.
-func (l *Linker) planPackage(name, source, target string, ignorePatterns []string) ([]LinkAction, error) {
+// planPackage computes the single link action for a package: symlinking the
+// source directory itself to the target path.
+func (l *Linker) planPackage(name, source, target string) ([]LinkAction, error) {
 	info, err := os.Stat(source)
 	if err != nil {
 		return nil, fmt.Errorf("source %q: %w", source, err)
@@ -114,48 +115,14 @@ func (l *Linker) planPackage(name, source, target string, ignorePatterns []strin
 		return nil, fmt.Errorf("source %q is not a directory", source)
 	}
 
-	var actions []LinkAction
-
-	err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil // only symlink files, not directories
-		}
-
-		ignored, err := resolver.ShouldIgnore(path, ignorePatterns)
-		if err != nil {
-			return fmt.Errorf("checking ignore for %q: %w", path, err)
-		}
-		if ignored {
-			actions = append(actions, LinkAction{
-				Package: name,
-				Source:  path,
-				Op:      OpSkip,
-				Reason:  "matched ignore pattern",
-			})
-			return nil
-		}
-
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		linkTarget := filepath.Join(target, rel)
-
-		op, reason := l.classifyTarget(path, linkTarget)
-		actions = append(actions, LinkAction{
-			Package: name,
-			Source:  path,
-			Target:  linkTarget,
-			Op:      op,
-			Reason:  reason,
-		})
-		return nil
-	})
-
-	return actions, err
+	op, reason := l.classifyTarget(source, target)
+	return []LinkAction{{
+		Package: name,
+		Source:  source,
+		Target:  target,
+		Op:      op,
+		Reason:  reason,
+	}}, nil
 }
 
 // classifyTarget determines the OpType for a given (source, target) pair by inspecting
