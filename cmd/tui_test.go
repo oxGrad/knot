@@ -542,7 +542,9 @@ func TestMin(t *testing.T) {
 func makeTempPackage(t *testing.T, files map[string]string) (source, target string) {
 	t.Helper()
 	source = t.TempDir()
-	target = t.TempDir()
+	// target must not exist yet: with directory symlinking the linker creates a
+	// symlink AT the target path, so an existing directory would be a CONFLICT.
+	target = filepath.Join(t.TempDir(), "target")
 	for rel, content := range files {
 		full := filepath.Join(source, rel)
 		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {

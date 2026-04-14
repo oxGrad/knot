@@ -806,22 +806,19 @@ func TestPrintPlan_Summary(t *testing.T) {
 }
 
 // TestStatus_ConflictAndBroken verifies Status reports conflict and broken lines.
+// With directory-level symlinking, CONFLICT means the target path already exists
+// as a non-symlink, and BROKEN means it is a symlink pointing nowhere.
+// Two packages are needed to produce both outcomes simultaneously.
 func TestStatus_ConflictAndBroken(t *testing.T) {
-	source := makePackageTree(t, map[string]string{
-		"conf.lua":  "-- config",
-		"other.lua": "-- other",
-	})
-	target := t.TempDir()
+	source1 := makePackageTree(t, map[string]string{"conf.lua": "-- config"})
+	source2 := makePackageTree(t, map[string]string{"other.lua": "-- other"})
 
-	// Create a regular file at conf.lua (conflict).
-	conflictPath := filepath.Join(target, "conf.lua")
-	if err := os.WriteFile(conflictPath, []byte("existing"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Conflict: target path is an existing directory (not a symlink).
+	conflictTarget := t.TempDir()
 
-	// Create a broken symlink at other.lua.
-	brokenPath := filepath.Join(target, "other.lua")
-	if err := os.Symlink("/nonexistent/path", brokenPath); err != nil {
+	// Broken: target path is a symlink pointing nowhere.
+	brokenTarget := filepath.Join(t.TempDir(), "broken")
+	if err := os.Symlink("/nonexistent/path", brokenTarget); err != nil {
 		t.Fatal(err)
 	}
 
@@ -834,7 +831,8 @@ func TestStatus_ConflictAndBroken(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Packages: map[string]config.Package{
-			"nvim": {Source: source, Target: target},
+			"nvim": {Source: source1, Target: conflictTarget},
+			"vim":  {Source: source2, Target: brokenTarget},
 		},
 	}
 
@@ -851,19 +849,18 @@ func TestStatus_ConflictAndBroken(t *testing.T) {
 }
 
 // TestApply_BrokenAndConflict verifies Apply outputs [BROKEN] and [CONFLICT] lines.
+// Two packages are used: one whose target is a real directory (CONFLICT) and one
+// whose target is a broken symlink (BROKEN).
 func TestApply_BrokenAndConflict(t *testing.T) {
-	source := makePackageTree(t, map[string]string{
-		"conf.lua":  "-- config",
-		"other.lua": "-- other",
-	})
-	target := t.TempDir()
+	source1 := makePackageTree(t, map[string]string{"conf.lua": "-- config"})
+	source2 := makePackageTree(t, map[string]string{"other.lua": "-- other"})
 
-	// Conflict: regular file exists.
-	if err := os.WriteFile(filepath.Join(target, "conf.lua"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Broken symlink.
-	if err := os.Symlink("/nonexistent", filepath.Join(target, "other.lua")); err != nil {
+	// Conflict: target path is an existing directory.
+	conflictTarget := t.TempDir()
+
+	// Broken: target path is a symlink pointing nowhere.
+	brokenTarget := filepath.Join(t.TempDir(), "broken")
+	if err := os.Symlink("/nonexistent", brokenTarget); err != nil {
 		t.Fatal(err)
 	}
 
@@ -876,11 +873,12 @@ func TestApply_BrokenAndConflict(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Packages: map[string]config.Package{
-			"nvim": {Source: source, Target: target},
+			"nvim": {Source: source1, Target: conflictTarget},
+			"vim":  {Source: source2, Target: brokenTarget},
 		},
 	}
 
-	actions, err := l.Plan(cfg, []string{"nvim"})
+	actions, err := l.Plan(cfg, []string{"nvim", "vim"})
 	if err != nil {
 		t.Fatalf("Plan() error: %v", err)
 	}
