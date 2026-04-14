@@ -3,37 +3,34 @@ services:
     build:
       context: .
       target: ubuntu
-    image: knot-test:ubuntu
     stdin_open: true
     tty: true
     environment:
-      - KNOT_DIR=/home/knot/dotfiles
+      - KNOT_DIR=/home/knot-user/dotfiles
     volumes:
-      - knot-ubuntu-home:/home/knot
+      - knot-ubuntu-home:/home/knot-user
 
   knot-fedora:
     build:
       context: .
       target: fedora
-    image: knot-test:fedora
     stdin_open: true
     tty: true
     environment:
-      - KNOT_DIR=/home/knot/dotfiles
+      - KNOT_DIR=/home/knot-user/dotfiles
     volumes:
-      - knot-fedora-home:/home/knot
+      - knot-fedora-home:/home/knot-user
 
   knot-arch:
     build:
       context: .
       target: arch
-    image: knot-test:arch
     stdin_open: true
     tty: true
     environment:
-      - KNOT_DIR=/home/knot/dotfiles
+      - KNOT_DIR=/home/knot-user/dotfiles
     volumes:
-      - knot-arch-home:/home/knot
+      - knot-arch-home:/home/knot-user
 
 volumes:
   knot-ubuntu-home:
