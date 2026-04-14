@@ -80,6 +80,19 @@ Exit codes:
 					errs = append(errs, fmt.Sprintf("[%s]: invalid ignore pattern %q: %v", name, pattern, matchErr))
 				}
 			}
+
+			// Tag checks.
+			seen := make(map[string]bool)
+			for _, tag := range pkg.Tags {
+				if tag == "" {
+					errs = append(errs, fmt.Sprintf("[%s]: tag name must not be empty", name))
+					continue
+				}
+				if seen[tag] {
+					warns = append(warns, fmt.Sprintf("[%s]: duplicate tag %q", name, tag))
+				}
+				seen[tag] = true
+			}
 		}
 
 		for _, e := range errs {

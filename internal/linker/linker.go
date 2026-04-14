@@ -165,9 +165,13 @@ func (l *Linker) PlanUntie(cfg *config.Config, packageNames []string) ([]LinkAct
 	}
 
 	for i, a := range actions {
-		if a.Op == OpExists {
+		switch a.Op {
+		case OpExists:
 			actions[i].Op = OpRemove
 			actions[i].Reason = "removing symlink"
+		case OpCreate:
+			actions[i].Op = OpSkip
+			actions[i].Reason = "not linked"
 		}
 	}
 	return actions, nil
@@ -186,7 +190,7 @@ func (l *Linker) Apply(actions []LinkAction) error {
 				_, _ = fmt.Fprintf(l.Writer, "[dry-run] create %s -> %s\n", a.Target, a.Source)
 				continue
 			}
-			if err := os.MkdirAll(filepath.Dir(a.Target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(a.Target), 0o755); err != nil {
 				errs = append(errs, fmt.Errorf("mkdir %q: %w", filepath.Dir(a.Target), err))
 				continue
 			}
