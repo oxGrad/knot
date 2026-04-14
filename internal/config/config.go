@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +20,7 @@ type Package struct {
 	Target    string     `yaml:"target"`
 	Ignore    []string   `yaml:"ignore,omitempty"`
 	Condition *Condition `yaml:"condition,omitempty"`
+	Tags      []string   `yaml:"tags,omitempty"`
 }
 
 // Condition gates a package on runtime attributes.
@@ -44,9 +46,13 @@ func Load(path string) (*Config, error) {
 	}
 
 	// Resolve source paths relative to the config file's directory.
+	// If source is omitted, default to ./<package-name>.
 	dir := filepath.Dir(path)
 	for name, pkg := range cfg.Packages {
-		if pkg.Source != "" && !filepath.IsAbs(pkg.Source) {
+		if pkg.Source == "" {
+			pkg.Source = "./" + name
+		}
+		if !filepath.IsAbs(pkg.Source) {
 			pkg.Source = filepath.Join(dir, pkg.Source)
 		}
 		cfg.Packages[name] = pkg
@@ -72,6 +78,21 @@ func DefaultDir(homeDir string) string {
 // DefaultKnotfilePath returns the default path to the Knotfile for the given home directory.
 func DefaultKnotfilePath(homeDir string) string {
 	return filepath.Join(DefaultDir(homeDir), KnotfileName)
+}
+
+// PackagesByTag returns a map of tag name → sorted slice of package names.
+// Only packages that declare at least one tag are included.
+func PackagesByTag(cfg *Config) map[string][]string {
+	result := make(map[string][]string)
+	for name, pkg := range cfg.Packages {
+		for _, tag := range pkg.Tags {
+			result[tag] = append(result[tag], name)
+		}
+	}
+	for tag := range result {
+		sort.Strings(result[tag])
+	}
+	return result
 }
 
 // FindConfigFile walks upward from startDir looking for a Knotfile.

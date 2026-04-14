@@ -147,6 +147,24 @@ func TestFindConfigFile_NotFound(t *testing.T) {
 	}
 }
 
+func TestLoad_DefaultSource(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  nvim:\n    target: ~/.config/nvim\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	want := filepath.Join(dir, "nvim")
+	if cfg.Packages["nvim"].Source != want {
+		t.Errorf("default source = %q, want %q", cfg.Packages["nvim"].Source, want)
+	}
+}
+
 func TestLoad_AbsoluteSourcePath(t *testing.T) {
 	dir := t.TempDir()
 	absSource := "/usr/local/share/dotfiles/nvim"
@@ -215,6 +233,79 @@ func TestDefaultKnotfilePath_WithEnv(t *testing.T) {
 	want := "/custom/dotfiles/Knotfile"
 	if got != want {
 		t.Errorf("DefaultKnotfilePath() = %q, want %q", got, want)
+	}
+}
+
+func TestLoad_Tags(t *testing.T) {
+	dir := t.TempDir()
+	yml := `packages:
+  nvim:
+    target: ~/.config/nvim
+    tags: [work, linux]
+  zsh:
+    target: ~/
+    tags: [home]
+  secrets:
+    target: ~/.ssh
+`
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := cfg.Packages["nvim"].Tags; len(got) != 2 || got[0] != "work" || got[1] != "linux" {
+		t.Errorf("nvim tags = %v, want [work linux]", got)
+	}
+	if got := cfg.Packages["secrets"].Tags; len(got) != 0 {
+		t.Errorf("secrets tags = %v, want []", got)
+	}
+}
+
+func TestPackagesByTag_Basic(t *testing.T) {
+	cfg := &Config{
+		Packages: map[string]Package{
+			"nvim":    {Tags: []string{"work", "linux"}},
+			"tmux":    {Tags: []string{"work"}},
+			"zsh":     {Tags: []string{"home"}},
+			"secrets": {},
+		},
+	}
+	got := PackagesByTag(cfg)
+
+	if pkgs := got["work"]; len(pkgs) != 2 || pkgs[0] != "nvim" || pkgs[1] != "tmux" {
+		t.Errorf("work = %v, want [nvim tmux]", pkgs)
+	}
+	if pkgs := got["linux"]; len(pkgs) != 1 || pkgs[0] != "nvim" {
+		t.Errorf("linux = %v, want [nvim]", pkgs)
+	}
+	if pkgs := got["home"]; len(pkgs) != 1 || pkgs[0] != "zsh" {
+		t.Errorf("home = %v, want [zsh]", pkgs)
+	}
+	if _, ok := got["secrets"]; ok {
+		t.Error("untagged package should not appear in PackagesByTag")
+	}
+}
+
+func TestPackagesByTag_SortedPackages(t *testing.T) {
+	cfg := &Config{
+		Packages: map[string]Package{
+			"zsh":  {Tags: []string{"home"}},
+			"nvim": {Tags: []string{"home"}},
+		},
+	}
+	got := PackagesByTag(cfg)
+	if pkgs := got["home"]; len(pkgs) != 2 || pkgs[0] != "nvim" || pkgs[1] != "zsh" {
+		t.Errorf("home = %v, want [nvim zsh] (sorted)", pkgs)
+	}
+}
+
+func TestPackagesByTag_Empty(t *testing.T) {
+	cfg := &Config{Packages: map[string]Package{}}
+	if got := PackagesByTag(cfg); len(got) != 0 {
+		t.Errorf("expected empty map, got %v", got)
 	}
 }
 
