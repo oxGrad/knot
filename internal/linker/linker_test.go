@@ -37,10 +37,10 @@ func newTestLinker(dryRun bool) *Linker {
 
 func TestPlan_CreateActions(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
-		"init.lua":      "-- neovim config",
+		"init.lua":       "-- neovim config",
 		"lua/plugin.lua": "-- plugin",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	cfg := &config.Config{
@@ -48,36 +48,6 @@ func TestPlan_CreateActions(t *testing.T) {
 			"nvim": {
 				Source: source,
 				Target: target,
-			},
-		},
-	}
-
-	actions, err := l.Plan(cfg, []string{"nvim"})
-	if err != nil {
-		t.Fatalf("Plan() error: %v", err)
-	}
-
-	creates := filterOp(actions, OpCreate)
-	if len(creates) != 2 {
-		t.Errorf("expected 2 OpCreate actions, got %d", len(creates))
-	}
-}
-
-func TestPlan_IgnorePatterns(t *testing.T) {
-	source := makePackageTree(t, map[string]string{
-		"init.lua":  "-- neovim config",
-		"README.md": "# readme",
-		".DS_Store": "junk",
-	})
-	target := t.TempDir()
-
-	l := newTestLinker(false)
-	cfg := &config.Config{
-		Packages: map[string]config.Package{
-			"nvim": {
-				Source: source,
-				Target: target,
-				Ignore: []string{"README.md", ".DS_Store"},
 			},
 		},
 	}
@@ -89,11 +59,42 @@ func TestPlan_IgnorePatterns(t *testing.T) {
 
 	creates := filterOp(actions, OpCreate)
 	if len(creates) != 1 {
-		t.Errorf("expected 1 OpCreate (only init.lua), got %d", len(creates))
+		t.Errorf("expected 1 OpCreate action (directory symlink), got %d", len(creates))
+	}
+}
+
+func TestPlan_IgnorePatterns(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"init.lua":  "-- neovim config",
+		"README.md": "# readme",
+		".DS_Store": "junk",
+	})
+	target := filepath.Join(t.TempDir(), "nvim-config")
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"nvim": {
+				Source: source,
+				Target: target,
+				Ignore: []string{"README.md", ".DS_Store"}, // kept for config compatibility
+			},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"nvim"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	// With directory-level symlinking the whole source dir is linked as one — 1 create, 0 skips.
+	creates := filterOp(actions, OpCreate)
+	if len(creates) != 1 {
+		t.Errorf("expected 1 OpCreate (source directory), got %d", len(creates))
 	}
 	skips := filterOp(actions, OpSkip)
-	if len(skips) != 2 {
-		t.Errorf("expected 2 OpSkip, got %d", len(skips))
+	if len(skips) != 0 {
+		t.Errorf("expected 0 OpSkip, got %d", len(skips))
 	}
 }
 
@@ -110,8 +111,8 @@ func TestPlan_ConditionNotMet(t *testing.T) {
 	cfg := &config.Config{
 		Packages: map[string]config.Package{
 			"yabai": {
-				Source: source,
-				Target: target,
+				Source:    source,
+				Target:    target,
 				Condition: &config.Condition{OS: "darwin"},
 			},
 		},
@@ -131,7 +132,7 @@ func TestApply_CreatesSymlinks(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -150,22 +151,21 @@ func TestApply_CreatesSymlinks(t *testing.T) {
 		t.Fatalf("Apply() error: %v", err)
 	}
 
-	linkPath := filepath.Join(target, "init.lua")
-	info, err := os.Lstat(linkPath)
+	// target itself should now be a symlink pointing to source.
+	info, err := os.Lstat(target)
 	if err != nil {
 		t.Fatalf("symlink not created: %v", err)
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
-		t.Error("expected symlink, got regular file")
+		t.Error("expected symlink, got regular file or directory")
 	}
 
-	dest, err := os.Readlink(linkPath)
+	dest, err := os.Readlink(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected := filepath.Join(source, "init.lua")
-	if dest != expected {
-		t.Errorf("symlink points to %q, want %q", dest, expected)
+	if dest != source {
+		t.Errorf("symlink points to %q, want %q", dest, source)
 	}
 }
 
@@ -173,7 +173,7 @@ func TestApply_Idempotent(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -211,7 +211,7 @@ func TestApply_DryRun(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	var buf bytes.Buffer
 	l := &Linker{
@@ -236,8 +236,7 @@ func TestApply_DryRun(t *testing.T) {
 	}
 
 	// No symlink should have been created.
-	linkPath := filepath.Join(target, "init.lua")
-	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
 		t.Error("dry-run should not create symlink")
 	}
 
@@ -251,13 +250,8 @@ func TestApply_Conflict(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
+	// target is a real existing directory — conflict with creating a directory symlink there.
 	target := t.TempDir()
-
-	// Pre-create a real file at the target location.
-	linkPath := filepath.Join(target, "init.lua")
-	if err := os.WriteFile(linkPath, []byte("existing file"), 0644); err != nil {
-		t.Fatal(err)
-	}
 
 	var buf bytes.Buffer
 	l := &Linker{
@@ -288,13 +282,13 @@ func TestApply_Conflict(t *testing.T) {
 		t.Errorf("Apply() with conflict should not return error, got: %v", err)
 	}
 
-	// Original file should be untouched.
-	content, err := os.ReadFile(linkPath)
+	// Target (real directory) should still exist and not be a symlink.
+	info, err := os.Lstat(target)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(content) != "existing file" {
-		t.Error("conflict target should not be overwritten")
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("conflict target should not be replaced with a symlink")
 	}
 }
 
@@ -302,7 +296,7 @@ func TestPlanUntie(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -333,7 +327,7 @@ func TestApply_Remove(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
 		"init.lua": "-- config",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -354,9 +348,9 @@ func TestApply_Remove(t *testing.T) {
 		t.Fatalf("Apply() untie error: %v", err)
 	}
 
-	linkPath := filepath.Join(target, "init.lua")
-	if _, err := os.Lstat(linkPath); !os.IsNotExist(err) {
-		t.Error("symlink should have been removed")
+	// The directory symlink should have been removed.
+	if _, err := os.Lstat(target); !os.IsNotExist(err) {
+		t.Error("directory symlink should have been removed")
 	}
 }
 
@@ -393,7 +387,7 @@ func TestPlan_SourceNotExist(t *testing.T) {
 
 func TestPlan_EmptySourceDir(t *testing.T) {
 	source := t.TempDir() // empty directory
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "empty-target")
 
 	l := newTestLinker(false)
 	cfg := &config.Config{
@@ -406,18 +400,21 @@ func TestPlan_EmptySourceDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Plan() error: %v", err)
 	}
-	if len(actions) != 0 {
-		t.Errorf("expected 0 actions for empty source dir, got %d", len(actions))
+	// Even an empty source dir produces 1 action: symlink the directory itself.
+	if len(actions) != 1 {
+		t.Errorf("expected 1 action for empty source dir, got %d", len(actions))
+	}
+	if actions[0].Op != OpCreate {
+		t.Errorf("expected OpCreate, got %s", actions[0].Op)
 	}
 }
 
 func TestPlan_BrokenSymlinkAtTarget(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
-	target := t.TempDir()
-
-	// Create a broken symlink at the target location.
-	linkPath := filepath.Join(target, "init.lua")
-	if err := os.Symlink("/nonexistent/destination", linkPath); err != nil {
+	// Put the broken symlink at the target path itself.
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "nvim-config")
+	if err := os.Symlink("/nonexistent/destination", target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -441,15 +438,11 @@ func TestPlan_BrokenSymlinkAtTarget(t *testing.T) {
 
 func TestPlan_WrongSymlinkAtTarget(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
-	target := t.TempDir()
-
-	// Create a symlink pointing to a different real file.
-	otherFile := filepath.Join(t.TempDir(), "other.lua")
-	if err := os.WriteFile(otherFile, []byte("other"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	linkPath := filepath.Join(target, "init.lua")
-	if err := os.Symlink(otherFile, linkPath); err != nil {
+	// Create a symlink at the target path pointing to a different real directory.
+	otherDir := t.TempDir()
+	targetDir := t.TempDir()
+	target := filepath.Join(targetDir, "nvim-config")
+	if err := os.Symlink(otherDir, target); err != nil {
 		t.Fatal(err)
 	}
 
@@ -473,11 +466,11 @@ func TestPlan_WrongSymlinkAtTarget(t *testing.T) {
 
 func TestPlan_NestedFiles(t *testing.T) {
 	source := makePackageTree(t, map[string]string{
-		"init.lua":          "-- top level",
-		"lua/colors.lua":    "-- colors",
-		"lua/lsp/init.lua":  "-- lsp",
+		"init.lua":         "-- top level",
+		"lua/colors.lua":   "-- colors",
+		"lua/lsp/init.lua": "-- lsp",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -492,31 +485,37 @@ func TestPlan_NestedFiles(t *testing.T) {
 		t.Fatalf("Plan() error: %v", err)
 	}
 
+	// With directory-level symlinking, nested files produce one action for the root dir.
 	creates := filterOp(actions, OpCreate)
-	if len(creates) != 3 {
-		t.Errorf("expected 3 OpCreate for nested files, got %d", len(creates))
+	if len(creates) != 1 {
+		t.Errorf("expected 1 OpCreate (source directory symlink), got %d", len(creates))
 	}
 
-	// Apply and verify intermediate directories are created.
+	// Apply and verify the directory symlink, plus that files are reachable through it.
 	if err := l.Apply(actions); err != nil {
 		t.Fatalf("Apply() error: %v", err)
 	}
+
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("expected symlink at %s: %v", target, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("expected symlink at %s, got regular file or directory", target)
+	}
+
+	// Files should be reachable through the symlink.
 	for _, rel := range []string{"init.lua", "lua/colors.lua", "lua/lsp/init.lua"} {
 		path := filepath.Join(target, rel)
-		info, err := os.Lstat(path)
-		if err != nil {
-			t.Errorf("expected symlink at %s: %v", path, err)
-			continue
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("expected symlink at %s, got regular file", path)
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected file reachable at %s: %v", path, err)
 		}
 	}
 }
 
 func TestPlanUntie_NoLinks(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	cfg := &config.Config{
@@ -607,7 +606,7 @@ func TestApply_UntieDoesNotToggle(t *testing.T) {
 
 func TestApply_DryRunRemove(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	l := newTestLinker(false)
 	l.Writer = &bytes.Buffer{}
@@ -632,8 +631,7 @@ func TestApply_DryRunRemove(t *testing.T) {
 	}
 
 	// Symlink should still exist.
-	linkPath := filepath.Join(target, "init.lua")
-	if _, err := os.Lstat(linkPath); os.IsNotExist(err) {
+	if _, err := os.Lstat(target); os.IsNotExist(err) {
 		t.Error("dry-run remove should not delete the symlink")
 	}
 	// But output should mention it.
@@ -647,7 +645,7 @@ func TestStatus_Output(t *testing.T) {
 		"init.lua": "-- config",
 		"lazy.lua": "-- lazy",
 	})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	var buf bytes.Buffer
 	l := &Linker{
@@ -663,7 +661,7 @@ func TestStatus_Output(t *testing.T) {
 		},
 	}
 
-	// Before tying: both files should show as MISSING.
+	// Before tying: directory symlink target is missing.
 	if err := l.Status(cfg); err != nil {
 		t.Fatalf("Status() error: %v", err)
 	}
@@ -688,7 +686,7 @@ func TestStatus_Output(t *testing.T) {
 
 func TestPrintPlan_Output(t *testing.T) {
 	source := makePackageTree(t, map[string]string{"init.lua": "-- config"})
-	target := t.TempDir()
+	target := filepath.Join(t.TempDir(), "nvim-config")
 
 	var buf bytes.Buffer
 	l := &Linker{
@@ -808,22 +806,19 @@ func TestPrintPlan_Summary(t *testing.T) {
 }
 
 // TestStatus_ConflictAndBroken verifies Status reports conflict and broken lines.
+// With directory-level symlinking, CONFLICT means the target path already exists
+// as a non-symlink, and BROKEN means it is a symlink pointing nowhere.
+// Two packages are needed to produce both outcomes simultaneously.
 func TestStatus_ConflictAndBroken(t *testing.T) {
-	source := makePackageTree(t, map[string]string{
-		"conf.lua":  "-- config",
-		"other.lua": "-- other",
-	})
-	target := t.TempDir()
+	source1 := makePackageTree(t, map[string]string{"conf.lua": "-- config"})
+	source2 := makePackageTree(t, map[string]string{"other.lua": "-- other"})
 
-	// Create a regular file at conf.lua (conflict).
-	conflictPath := filepath.Join(target, "conf.lua")
-	if err := os.WriteFile(conflictPath, []byte("existing"), 0644); err != nil {
-		t.Fatal(err)
-	}
+	// Conflict: target path is an existing directory (not a symlink).
+	conflictTarget := t.TempDir()
 
-	// Create a broken symlink at other.lua.
-	brokenPath := filepath.Join(target, "other.lua")
-	if err := os.Symlink("/nonexistent/path", brokenPath); err != nil {
+	// Broken: target path is a symlink pointing nowhere.
+	brokenTarget := filepath.Join(t.TempDir(), "broken")
+	if err := os.Symlink("/nonexistent/path", brokenTarget); err != nil {
 		t.Fatal(err)
 	}
 
@@ -836,7 +831,8 @@ func TestStatus_ConflictAndBroken(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Packages: map[string]config.Package{
-			"nvim": {Source: source, Target: target},
+			"nvim": {Source: source1, Target: conflictTarget},
+			"vim":  {Source: source2, Target: brokenTarget},
 		},
 	}
 
@@ -853,19 +849,18 @@ func TestStatus_ConflictAndBroken(t *testing.T) {
 }
 
 // TestApply_BrokenAndConflict verifies Apply outputs [BROKEN] and [CONFLICT] lines.
+// Two packages are used: one whose target is a real directory (CONFLICT) and one
+// whose target is a broken symlink (BROKEN).
 func TestApply_BrokenAndConflict(t *testing.T) {
-	source := makePackageTree(t, map[string]string{
-		"conf.lua":  "-- config",
-		"other.lua": "-- other",
-	})
-	target := t.TempDir()
+	source1 := makePackageTree(t, map[string]string{"conf.lua": "-- config"})
+	source2 := makePackageTree(t, map[string]string{"other.lua": "-- other"})
 
-	// Conflict: regular file exists.
-	if err := os.WriteFile(filepath.Join(target, "conf.lua"), []byte("x"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	// Broken symlink.
-	if err := os.Symlink("/nonexistent", filepath.Join(target, "other.lua")); err != nil {
+	// Conflict: target path is an existing directory.
+	conflictTarget := t.TempDir()
+
+	// Broken: target path is a symlink pointing nowhere.
+	brokenTarget := filepath.Join(t.TempDir(), "broken")
+	if err := os.Symlink("/nonexistent", brokenTarget); err != nil {
 		t.Fatal(err)
 	}
 
@@ -878,11 +873,12 @@ func TestApply_BrokenAndConflict(t *testing.T) {
 	}
 	cfg := &config.Config{
 		Packages: map[string]config.Package{
-			"nvim": {Source: source, Target: target},
+			"nvim": {Source: source1, Target: conflictTarget},
+			"vim":  {Source: source2, Target: brokenTarget},
 		},
 	}
 
-	actions, err := l.Plan(cfg, []string{"nvim"})
+	actions, err := l.Plan(cfg, []string{"nvim", "vim"})
 	if err != nil {
 		t.Fatalf("Plan() error: %v", err)
 	}

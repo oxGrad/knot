@@ -1,0 +1,16 @@
+# knot tie --dry-run prints actions but does not create symlinks.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+exec knot --dry-run tie nvim
+stdout '\[dry-run\] create'
+
+# No symlinks must have been created.
+! exists $HOME/nvim-config/.vimrc

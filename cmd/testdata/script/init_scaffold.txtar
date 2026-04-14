@@ -1,0 +1,6 @@
+# knot init creates a starter Knotfile at KNOT_DIR/Knotfile.
+env KNOT_DIR=$WORK/dotfiles
+
+exec knot init
+stdout 'Created'
+exists $WORK/dotfiles/Knotfile

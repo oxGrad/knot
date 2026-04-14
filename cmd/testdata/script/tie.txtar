@@ -1,0 +1,24 @@
+# knot tie creates symlinks and knot status shows OK afterwards.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/nvim/init.lua --
+-- lua config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+exec knot tie nvim
+stdout 'linked'
+
+# Symlinks must exist.
+exists $HOME/nvim-config/.vimrc
+exists $HOME/nvim-config/init.lua
+
+# Status now shows OK.
+exec knot status
+stdout '\[OK\]'
+stdout '1 ok, 0 missing'

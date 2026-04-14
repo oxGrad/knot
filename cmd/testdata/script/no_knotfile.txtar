@@ -1,0 +1,8 @@
+# Commands that need a Knotfile fail gracefully when none exists.
+env KNOT_DIR=$WORK/dotfiles
+
+! exec knot status
+stderr '.'
+
+! exec knot tie --all
+stderr '.'

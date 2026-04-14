@@ -1,0 +1,16 @@
+# knot validate errors on unknown condition.os values.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/.config/nvim
+    condition:
+      os: haiku
+
+! exec knot validate
+stdout 'unknown condition.os'
+stdout 'Validation failed'
