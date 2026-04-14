@@ -1086,7 +1086,7 @@ func (m model) viewBranch() string {
 				current = "  " + styleDim.Render("(current)")
 			}
 
-			b.WriteString(fmt.Sprintf("%s%s%s\n", cursor, name, current))
+			fmt.Fprintf(&b, "%s%s%s\n", cursor, name, current)
 		}
 	}
 
