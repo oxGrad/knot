@@ -1130,7 +1130,8 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		if cfgFile == "" {
 			home, _ := os.UserHomeDir()
 			dir := config.DefaultDir(home)
-			if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+			knotfile := config.DefaultKnotfilePath(home)
+			if _, statErr := os.Stat(knotfile); os.IsNotExist(statErr) {
 				if wizErr := runSetupWizard(dir); wizErr != nil {
 					return wizErr
 				}
