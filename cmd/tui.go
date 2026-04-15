@@ -1127,7 +1127,19 @@ func (m model) viewResult() string {
 func runTUI(cmd *cobra.Command, args []string) error {
 	cfg, cfgPath, err := loadConfig()
 	if err != nil {
-		return fmt.Errorf("loading config: %w", err)
+		if cfgFile == "" {
+			home, _ := os.UserHomeDir()
+			dir := config.DefaultDir(home)
+			if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+				if wizErr := runSetupWizard(dir); wizErr != nil {
+					return wizErr
+				}
+				cfg, cfgPath, err = loadConfig()
+			}
+		}
+		if err != nil {
+			return fmt.Errorf("loading config: %w", err)
+		}
 	}
 
 	lnk := linker.New(false)
@@ -1149,6 +1161,243 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
+}
+
+// ── setup wizard ─────────────────────────────────────────────────────────────
+
+type setupPhase int
+
+const (
+	setupPhaseMenu     setupPhase = iota // choose: clone or init
+	setupPhaseGitURL                     // text input for git URL
+	setupPhaseCloning                    // running git clone
+	setupPhaseKnotfile                   // choose: template or empty (post-clone, no Knotfile)
+	setupPhaseDone                       // success, about to exit
+)
+
+type setupModel struct {
+	dir      string     // target dotfiles directory
+	phase    setupPhase
+	cursor   int    // menu cursor (0 or 1)
+	inputBuf string // accumulates typed URL characters
+	cloneURL string // committed URL for cloning
+	err      error  // last error to display
+	width    int
+}
+
+type cloneDoneMsg     struct{ err error }
+type knotfileReadyMsg struct{ err error }
+
+func cloneRepoCmd(url, dir string) tea.Cmd {
+	return func() tea.Msg {
+		c := exec.Command("git", "clone", url, dir)
+		if err := c.Run(); err != nil {
+			return cloneDoneMsg{err: fmt.Errorf("git clone failed: %w", err)}
+		}
+		return cloneDoneMsg{}
+	}
+}
+
+func writeKnotfileCmd(dir string, useTemplate bool) tea.Cmd {
+	return func() tea.Msg {
+		knotfilePath := filepath.Join(dir, config.KnotfileName)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return knotfileReadyMsg{err: fmt.Errorf("creating directory: %w", err)}
+		}
+		content := exampleKnotfile
+		if !useTemplate {
+			content = []byte("packages: {}\n")
+		}
+		if err := os.WriteFile(knotfilePath, content, 0644); err != nil {
+			return knotfileReadyMsg{err: fmt.Errorf("writing Knotfile: %w", err)}
+		}
+		return knotfileReadyMsg{}
+	}
+}
+
+func (m setupModel) Init() tea.Cmd { return nil }
+
+func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+
+	case cloneDoneMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.phase = setupPhaseGitURL
+			return m, nil
+		}
+		// Check if Knotfile exists after clone
+		knotfilePath := filepath.Join(m.dir, config.KnotfileName)
+		if _, err := os.Stat(knotfilePath); err == nil {
+			m.phase = setupPhaseDone
+			return m, tea.Quit
+		}
+		// No Knotfile found — ask user
+		m.cursor = 0
+		m.phase = setupPhaseKnotfile
+		return m, nil
+
+	case knotfileReadyMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.phase = setupPhaseDone
+		return m, tea.Quit
+
+	case tea.KeyMsg:
+		switch m.phase {
+		case setupPhaseMenu:
+			return m.updateMenu(msg)
+		case setupPhaseGitURL:
+			return m.updateGitURL(msg)
+		case setupPhaseKnotfile:
+			return m.updateKnotfileChoice(msg)
+		}
+	}
+	return m, nil
+}
+
+func (m setupModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < 1 {
+			m.cursor++
+		}
+	case "enter", " ":
+		m.err = nil
+		if m.cursor == 0 {
+			// Clone from git
+			m.phase = setupPhaseGitURL
+			m.inputBuf = ""
+		} else {
+			// Init new
+			return m, writeKnotfileCmd(m.dir, true)
+		}
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m setupModel) updateGitURL(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyRunes:
+		m.inputBuf += msg.String()
+	case tea.KeyBackspace, tea.KeyDelete:
+		if len(m.inputBuf) > 0 {
+			runes := []rune(m.inputBuf)
+			m.inputBuf = string(runes[:len(runes)-1])
+		}
+	case tea.KeyEnter:
+		url := strings.TrimSpace(m.inputBuf)
+		if url == "" {
+			return m, nil
+		}
+		m.cloneURL = url
+		m.err = nil
+		m.phase = setupPhaseCloning
+		return m, cloneRepoCmd(url, m.dir)
+	case tea.KeyEsc:
+		m.phase = setupPhaseMenu
+		m.err = nil
+	case tea.KeyCtrlC:
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m setupModel) updateKnotfileChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < 1 {
+			m.cursor++
+		}
+	case "enter", " ":
+		useTemplate := m.cursor == 0
+		return m, writeKnotfileCmd(m.dir, useTemplate)
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m setupModel) View() string {
+	var b strings.Builder
+
+	b.WriteString(styleBold.Render("knot setup") + "\n\n")
+
+	switch m.phase {
+	case setupPhaseMenu:
+		b.WriteString("No dotfiles directory found at " + styleCyan.Render(m.dir) + ".\n\n")
+		opts := []string{"Clone existing dotfiles from git", "Initialize new dotfiles folder"}
+		for i, opt := range opts {
+			if i == m.cursor {
+				b.WriteString(styleCursor.Render("> ") + styleBold.Render(opt) + "\n")
+			} else {
+				b.WriteString("  " + opt + "\n")
+			}
+		}
+		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · q to quit"))
+
+	case setupPhaseGitURL:
+		b.WriteString("Enter the git URL of your dotfiles repository:\n\n")
+		b.WriteString("  " + styleCyan.Render(m.inputBuf) + "█\n")
+		b.WriteString("\n" + styleDim.Render("enter to confirm · esc to go back · ctrl+c to quit"))
+		if m.err != nil {
+			b.WriteString("\n\n" + styleRed.Render(m.err.Error()))
+		}
+
+	case setupPhaseCloning:
+		b.WriteString("Cloning " + styleCyan.Render(m.cloneURL) + "\n")
+		b.WriteString("into    " + styleCyan.Render(m.dir) + "\n\n")
+		b.WriteString(styleDim.Render("Please wait…"))
+
+	case setupPhaseKnotfile:
+		b.WriteString("No Knotfile found in the cloned repository.\n")
+		b.WriteString("How would you like to proceed?\n\n")
+		opts := []string{"Load from template", "Create empty Knotfile"}
+		for i, opt := range opts {
+			if i == m.cursor {
+				b.WriteString(styleCursor.Render("> ") + styleBold.Render(opt) + "\n")
+			} else {
+				b.WriteString("  " + opt + "\n")
+			}
+		}
+		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · q to quit"))
+		if m.err != nil {
+			b.WriteString("\n\n" + styleRed.Render(m.err.Error()))
+		}
+
+	case setupPhaseDone:
+		b.WriteString(styleGreen.Render("Setup complete.") + " Starting knot…")
+	}
+
+	return b.String()
+}
+
+func runSetupWizard(dir string) error {
+	m := setupModel{dir: dir}
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	final, err := p.Run()
+	if err != nil {
+		return err
+	}
+	if sm, ok := final.(setupModel); ok && sm.err != nil {
+		return sm.err
+	}
+	return nil
 }
 
 // ── utils ─────────────────────────────────────────────────────────────────────
