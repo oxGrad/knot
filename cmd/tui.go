@@ -35,11 +35,12 @@ var (
 type pkgStatus int
 
 const (
-	statusUntied   pkgStatus = iota
+	statusUntied          pkgStatus = iota
 	statusTied
 	statusPartial
 	statusConflict
 	statusSkipped
+	statusSourceNotFound
 )
 
 func (s pkgStatus) label() string {
@@ -54,12 +55,14 @@ func (s pkgStatus) label() string {
 		return styleRed.Render("conflict")
 	case statusSkipped:
 		return styleDim.Render("skipped")
+	case statusSourceNotFound:
+		return styleYellow.Render("no source")
 	}
 	return "unknown"
 }
 
 func computeStatus(actions []linker.LinkAction) pkgStatus {
-	var tied, untied, conflict, skipped int
+	var tied, untied, conflict, skipped, sourceNotFound int
 	for _, a := range actions {
 		switch a.Op {
 		case linker.OpExists:
@@ -70,9 +73,14 @@ func computeStatus(actions []linker.LinkAction) pkgStatus {
 			conflict++
 		case linker.OpSkip:
 			skipped++
+		case linker.OpSourceNotFound:
+			sourceNotFound++
 		}
 	}
 	nonSkip := tied + untied + conflict
+	if nonSkip == 0 && sourceNotFound > 0 {
+		return statusSourceNotFound
+	}
 	if nonSkip == 0 {
 		return statusSkipped
 	}
@@ -317,7 +325,7 @@ func (m *model) pendingCount() int {
 
 func (m *model) togglePackage(i int) {
 	row := m.rows[i]
-	if row.status == statusSkipped || row.status == statusConflict {
+	if row.status == statusSkipped || row.status == statusConflict || row.status == statusSourceNotFound {
 		return
 	}
 	m.toggles[row.name] = !m.toggles[row.name]
@@ -1131,8 +1139,21 @@ func runTUI(cmd *cobra.Command, args []string) error {
 			home, _ := os.UserHomeDir()
 			dir := config.DefaultDir(home)
 			knotfile := config.DefaultKnotfilePath(home)
-			if _, statErr := os.Stat(knotfile); os.IsNotExist(statErr) {
-				if wizErr := runSetupWizard(dir); wizErr != nil {
+			_, dirErr := os.Stat(dir)
+			_, knotfileErr := os.Stat(knotfile)
+			switch {
+			case os.IsNotExist(dirErr):
+				if wizErr := runSetupWizard(dir, setupModeInit); wizErr != nil {
+					return wizErr
+				}
+				cfg, cfgPath, err = loadConfig()
+			case os.IsNotExist(knotfileErr):
+				wizErr := runSetupWizard(dir, setupModeKnotfile)
+				if wizErr == errSetupDeclined {
+					fmt.Fprintf(os.Stderr, "No Knotfile in %s. Run 'knot init' to create one.\n", dir)
+					return nil
+				}
+				if wizErr != nil {
 					return wizErr
 				}
 				cfg, cfgPath, err = loadConfig()
@@ -1166,23 +1187,32 @@ func runTUI(cmd *cobra.Command, args []string) error {
 
 // ── setup wizard ─────────────────────────────────────────────────────────────
 
+type setupMode int
+
+const (
+	setupModeInit     setupMode = iota // dotfiles dir missing: show init/clone menu
+	setupModeKnotfile                  // dir present, Knotfile missing: confirm only
+)
+
 type setupPhase int
 
 const (
-	setupPhaseMenu     setupPhase = iota // choose: clone or init
-	setupPhaseGitURL                     // text input for git URL
-	setupPhaseCloning                    // running git clone
-	setupPhaseKnotfile                   // choose: template or empty (post-clone, no Knotfile)
-	setupPhaseDone                       // success, about to exit
+	setupPhaseMenu            setupPhase = iota // choose: initialize or clone from git
+	setupPhaseGitURL                            // text input for git URL
+	setupPhaseCloning                           // running git clone
+	setupPhaseConfirmKnotfile                   // dir exists, no Knotfile: y/n prompt
+	setupPhaseDone                              // success, about to exit
 )
 
 type setupModel struct {
-	dir      string     // target dotfiles directory
+	dir      string
+	mode     setupMode
 	phase    setupPhase
 	cursor   int    // menu cursor (0 or 1)
 	inputBuf string // accumulates typed URL characters
 	cloneURL string // committed URL for cloning
 	err      error  // last error to display
+	declined bool   // user chose not to create Knotfile
 	width    int
 }
 
@@ -1199,24 +1229,25 @@ func cloneRepoCmd(url, dir string) tea.Cmd {
 	}
 }
 
-func writeKnotfileCmd(dir string, useTemplate bool) tea.Cmd {
+func writeKnotfileCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
 		knotfilePath := filepath.Join(dir, config.KnotfileName)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return knotfileReadyMsg{err: fmt.Errorf("creating directory: %w", err)}
 		}
-		content := exampleKnotfile
-		if !useTemplate {
-			content = []byte("packages: {}\n")
-		}
-		if err := os.WriteFile(knotfilePath, content, 0644); err != nil {
+		if err := os.WriteFile(knotfilePath, exampleKnotfile, 0644); err != nil {
 			return knotfileReadyMsg{err: fmt.Errorf("writing Knotfile: %w", err)}
 		}
 		return knotfileReadyMsg{}
 	}
 }
 
-func (m setupModel) Init() tea.Cmd { return nil }
+func (m setupModel) Init() tea.Cmd {
+	if m.mode == setupModeKnotfile {
+		return func() tea.Msg { return nil }
+	}
+	return nil
+}
 
 func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -1230,16 +1261,13 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.phase = setupPhaseGitURL
 			return m, nil
 		}
-		// Check if Knotfile exists after clone
+		// After clone: if no Knotfile, create from template automatically
 		knotfilePath := filepath.Join(m.dir, config.KnotfileName)
-		if _, err := os.Stat(knotfilePath); err == nil {
-			m.phase = setupPhaseDone
-			return m, tea.Quit
+		if _, err := os.Stat(knotfilePath); os.IsNotExist(err) {
+			return m, writeKnotfileCmd(m.dir)
 		}
-		// No Knotfile found — ask user
-		m.cursor = 0
-		m.phase = setupPhaseKnotfile
-		return m, nil
+		m.phase = setupPhaseDone
+		return m, tea.Quit
 
 	case knotfileReadyMsg:
 		if msg.err != nil {
@@ -1255,8 +1283,8 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateMenu(msg)
 		case setupPhaseGitURL:
 			return m.updateGitURL(msg)
-		case setupPhaseKnotfile:
-			return m.updateKnotfileChoice(msg)
+		case setupPhaseConfirmKnotfile:
+			return m.updateConfirmKnotfile(msg)
 		}
 	}
 	return m, nil
@@ -1275,13 +1303,12 @@ func (m setupModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", " ":
 		m.err = nil
 		if m.cursor == 0 {
-			// Clone from git
-			m.phase = setupPhaseGitURL
-			m.inputBuf = ""
-		} else {
-			// Init new
-			return m, writeKnotfileCmd(m.dir, true)
+			// Initialize new dotfiles folder
+			return m, writeKnotfileCmd(m.dir)
 		}
+		// Clone from git
+		m.phase = setupPhaseGitURL
+		m.inputBuf = ""
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
@@ -1315,20 +1342,12 @@ func (m setupModel) updateGitURL(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m setupModel) updateKnotfileChoice(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m setupModel) updateConfirmKnotfile(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < 1 {
-			m.cursor++
-		}
-	case "enter", " ":
-		useTemplate := m.cursor == 0
-		return m, writeKnotfileCmd(m.dir, useTemplate)
-	case "q", "ctrl+c":
+	case "y", "enter":
+		return m, writeKnotfileCmd(m.dir)
+	case "n", "esc", "q", "ctrl+c":
+		m.declined = true
 		return m, tea.Quit
 	}
 	return m, nil
@@ -1342,7 +1361,7 @@ func (m setupModel) View() string {
 	switch m.phase {
 	case setupPhaseMenu:
 		b.WriteString("No dotfiles directory found at " + styleCyan.Render(m.dir) + ".\n\n")
-		opts := []string{"Clone existing dotfiles from git", "Initialize new dotfiles folder"}
+		opts := []string{"Initialize new dotfiles folder", "Clone existing dotfiles from git"}
 		for i, opt := range opts {
 			if i == m.cursor {
 				b.WriteString(styleCursor.Render("> ") + styleBold.Render(opt) + "\n")
@@ -1365,20 +1384,11 @@ func (m setupModel) View() string {
 		b.WriteString("into    " + styleCyan.Render(m.dir) + "\n\n")
 		b.WriteString(styleDim.Render("Please wait…"))
 
-	case setupPhaseKnotfile:
-		b.WriteString("No Knotfile found in the cloned repository.\n")
-		b.WriteString("How would you like to proceed?\n\n")
-		opts := []string{"Load from template", "Create empty Knotfile"}
-		for i, opt := range opts {
-			if i == m.cursor {
-				b.WriteString(styleCursor.Render("> ") + styleBold.Render(opt) + "\n")
-			} else {
-				b.WriteString("  " + opt + "\n")
-			}
-		}
-		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · q to quit"))
+	case setupPhaseConfirmKnotfile:
+		b.WriteString("No Knotfile found in " + styleCyan.Render(m.dir) + ".\n\n")
+		b.WriteString("Create one from template? " + styleBold.Render("[y/n]") + "\n")
 		if m.err != nil {
-			b.WriteString("\n\n" + styleRed.Render(m.err.Error()))
+			b.WriteString("\n" + styleRed.Render(m.err.Error()))
 		}
 
 	case setupPhaseDone:
@@ -1388,15 +1398,31 @@ func (m setupModel) View() string {
 	return b.String()
 }
 
-func runSetupWizard(dir string) error {
-	m := setupModel{dir: dir}
+// errSetupDeclined is returned by runSetupWizard when the user explicitly
+// chose not to create a Knotfile. It is not a real error — callers should
+// exit cleanly and print a helpful hint instead.
+var errSetupDeclined = fmt.Errorf("setup declined")
+
+func runSetupWizard(dir string, mode setupMode) error {
+	phase := setupPhaseMenu
+	if mode == setupModeKnotfile {
+		phase = setupPhaseConfirmKnotfile
+	}
+	m := setupModel{dir: dir, mode: mode, phase: phase}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	final, err := p.Run()
 	if err != nil {
 		return err
 	}
-	if sm, ok := final.(setupModel); ok && sm.err != nil {
+	sm, ok := final.(setupModel)
+	if !ok {
+		return nil
+	}
+	if sm.err != nil {
 		return sm.err
+	}
+	if sm.declined {
+		return errSetupDeclined
 	}
 	return nil
 }

@@ -16,12 +16,13 @@ import (
 type OpType int
 
 const (
-	OpCreate   OpType = iota // symlink will be created
-	OpExists                 // correct symlink already present — no-op
-	OpConflict               // target exists but is not the expected symlink
-	OpBroken                 // target is a symlink pointing nowhere
-	OpRemove                 // symlink will be removed (untie)
-	OpSkip                   // ignored by pattern or condition
+	OpCreate          OpType = iota // symlink will be created
+	OpExists                        // correct symlink already present — no-op
+	OpConflict                      // target exists but is not the expected symlink
+	OpBroken                        // target is a symlink pointing nowhere
+	OpRemove                        // symlink will be removed (untie)
+	OpSkip                          // ignored by pattern or condition
+	OpSourceNotFound                // source directory does not exist on this machine
 )
 
 func (o OpType) String() string {
@@ -38,6 +39,8 @@ func (o OpType) String() string {
 		return "remove"
 	case OpSkip:
 		return "skip"
+	case OpSourceNotFound:
+		return "source-not-found"
 	default:
 		return "unknown"
 	}
@@ -109,6 +112,15 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 func (l *Linker) planPackage(name, source, target string) ([]LinkAction, error) {
 	info, err := os.Stat(source)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []LinkAction{{
+				Package: name,
+				Source:  source,
+				Target:  target,
+				Op:      OpSourceNotFound,
+				Reason:  fmt.Sprintf("source directory %q does not exist", source),
+			}}, nil
+		}
 		return nil, fmt.Errorf("source %q: %w", source, err)
 	}
 	if !info.IsDir() {
@@ -222,6 +234,9 @@ func (l *Linker) Apply(actions []LinkAction) error {
 
 		case OpSkip:
 			// silent skip
+
+		case OpSourceNotFound:
+			// silent skip — source directory not present on this machine
 		}
 	}
 
@@ -254,6 +269,8 @@ func (l *Linker) Status(cfg *config.Config) error {
 			_, _ = fmt.Fprintf(l.Writer, "[BROKEN]   %s\n", a.Target)
 		case OpSkip:
 			// silent
+		case OpSourceNotFound:
+			_, _ = fmt.Fprintf(l.Writer, "[NO SOURCE] %s: %s\n", a.Package, a.Reason)
 		}
 	}
 
@@ -280,6 +297,8 @@ func (l *Linker) PrintPlan(actions []LinkAction) {
 			_, _ = fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
 		case OpSkip:
 			// silent
+		case OpSourceNotFound:
+			_, _ = fmt.Fprintf(l.Writer, "  ? %s (source not found)\n", a.Package)
 		}
 	}
 
