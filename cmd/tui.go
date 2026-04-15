@@ -1198,22 +1198,46 @@ type setupPhase int
 
 const (
 	setupPhaseMenu            setupPhase = iota // choose: initialize or clone from git
-	setupPhaseGitURL                            // text input for git URL
+	setupPhaseGitProvider                       // choose: GitHub or GitLab
+	setupPhaseGitProtocol                       // choose: HTTPS or SSH
+	setupPhaseGitUsername                       // text input for username
+	setupPhaseGitRepo                           // text input for repo name
 	setupPhaseCloning                           // running git clone
 	setupPhaseConfirmKnotfile                   // dir exists, no Knotfile: y/n prompt
 	setupPhaseDone                              // success, about to exit
 )
 
 type setupModel struct {
-	dir      string
-	mode     setupMode
-	phase    setupPhase
-	cursor   int    // menu cursor (0 or 1)
-	inputBuf string // accumulates typed URL characters
-	cloneURL string // committed URL for cloning
-	err      error  // last error to display
-	declined bool   // user chose not to create Knotfile
-	width    int
+	dir         string
+	mode        setupMode
+	phase       setupPhase
+	cursor      int    // menu cursor
+	inputBuf    string // accumulates typed characters
+	gitProvider string // "github" or "gitlab"
+	gitProtocol string // "https" or "ssh"
+	gitUsername string
+	gitRepo     string
+	cloneURL    string // fully constructed URL for cloning
+	err         error  // last error to display
+	declined    bool   // user chose not to create Knotfile
+	width       int
+}
+
+func buildGitURL(provider, protocol, username, repo string) string {
+	if repo == "" {
+		repo = ".dotfiles"
+	}
+	switch {
+	case provider == "github" && protocol == "https":
+		return fmt.Sprintf("https://github.com/%s/%s", username, repo)
+	case provider == "github" && protocol == "ssh":
+		return fmt.Sprintf("git@github.com:%s/%s.git", username, repo)
+	case provider == "gitlab" && protocol == "https":
+		return fmt.Sprintf("https://gitlab.com/%s/%s", username, repo)
+	case provider == "gitlab" && protocol == "ssh":
+		return fmt.Sprintf("git@gitlab.com:%s/%s.git", username, repo)
+	}
+	return ""
 }
 
 type cloneDoneMsg     struct{ err error }
@@ -1258,7 +1282,7 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case cloneDoneMsg:
 		if msg.err != nil {
 			m.err = msg.err
-			m.phase = setupPhaseGitURL
+			m.phase = setupPhaseGitRepo
 			return m, nil
 		}
 		// After clone: if no Knotfile, create from template automatically
@@ -1281,8 +1305,14 @@ func (m setupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.phase {
 		case setupPhaseMenu:
 			return m.updateMenu(msg)
-		case setupPhaseGitURL:
-			return m.updateGitURL(msg)
+		case setupPhaseGitProvider:
+			return m.updateGitProvider(msg)
+		case setupPhaseGitProtocol:
+			return m.updateGitProtocol(msg)
+		case setupPhaseGitUsername:
+			return m.updateGitInput(msg, setupPhaseGitProtocol, setupPhaseGitRepo)
+		case setupPhaseGitRepo:
+			return m.updateGitInput(msg, setupPhaseGitUsername, setupPhaseGitRepo)
 		case setupPhaseConfirmKnotfile:
 			return m.updateConfirmKnotfile(msg)
 		}
@@ -1303,19 +1333,75 @@ func (m setupModel) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter", " ":
 		m.err = nil
 		if m.cursor == 0 {
-			// Initialize new dotfiles folder
 			return m, writeKnotfileCmd(m.dir)
 		}
-		// Clone from git
-		m.phase = setupPhaseGitURL
-		m.inputBuf = ""
+		// Clone from git — start guided flow
+		m.phase = setupPhaseGitProvider
+		m.cursor = 0
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
 	return m, nil
 }
 
-func (m setupModel) updateGitURL(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m setupModel) updateGitProvider(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < 1 {
+			m.cursor++
+		}
+	case "enter", " ":
+		if m.cursor == 0 {
+			m.gitProvider = "github"
+		} else {
+			m.gitProvider = "gitlab"
+		}
+		m.cursor = 0
+		m.phase = setupPhaseGitProtocol
+	case "esc":
+		m.phase = setupPhaseMenu
+		m.cursor = 1 // restore "Clone from git" selection
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m setupModel) updateGitProtocol(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < 1 {
+			m.cursor++
+		}
+	case "enter", " ":
+		if m.cursor == 0 {
+			m.gitProtocol = "https"
+		} else {
+			m.gitProtocol = "ssh"
+		}
+		m.cursor = 0
+		m.inputBuf = ""
+		m.phase = setupPhaseGitUsername
+	case "esc":
+		m.phase = setupPhaseGitProvider
+		m.cursor = 0
+	case "q", "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// updateGitInput handles text entry for both the username and repo phases.
+// backPhase is where esc goes; nextPhase is where enter goes (or clones if repo phase).
+func (m setupModel) updateGitInput(msg tea.KeyMsg, backPhase, nextPhase setupPhase) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyRunes:
 		m.inputBuf += msg.String()
@@ -1325,20 +1411,34 @@ func (m setupModel) updateGitURL(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.inputBuf = string(runes[:len(runes)-1])
 		}
 	case tea.KeyEnter:
-		url := strings.TrimSpace(m.inputBuf)
-		if url == "" {
-			return m, nil
+		if m.phase == setupPhaseGitUsername {
+			username := strings.TrimSpace(m.inputBuf)
+			if username == "" {
+				return m, nil
+			}
+			m.gitUsername = username
+			m.inputBuf = ""
+			m.phase = setupPhaseGitRepo
+		} else {
+			// repo phase — build URL and clone
+			repo := strings.TrimSpace(m.inputBuf)
+			if repo == "" {
+				repo = ".dotfiles"
+			}
+			m.gitRepo = repo
+			m.cloneURL = buildGitURL(m.gitProvider, m.gitProtocol, m.gitUsername, repo)
+			m.err = nil
+			m.phase = setupPhaseCloning
+			return m, cloneRepoCmd(m.cloneURL, m.dir)
 		}
-		m.cloneURL = url
-		m.err = nil
-		m.phase = setupPhaseCloning
-		return m, cloneRepoCmd(url, m.dir)
 	case tea.KeyEsc:
-		m.phase = setupPhaseMenu
+		m.inputBuf = ""
 		m.err = nil
+		m.phase = backPhase
 	case tea.KeyCtrlC:
 		return m, tea.Quit
 	}
+	_ = nextPhase
 	return m, nil
 }
 
@@ -1371,10 +1471,45 @@ func (m setupModel) View() string {
 		}
 		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · q to quit"))
 
-	case setupPhaseGitURL:
-		b.WriteString("Enter the git URL of your dotfiles repository:\n\n")
+	case setupPhaseGitProvider:
+		b.WriteString("Select a git provider:\n\n")
+		providers := []string{"GitHub", "GitLab"}
+		for i, p := range providers {
+			if i == m.cursor {
+				b.WriteString(styleCursor.Render("> ") + styleBold.Render(p) + "\n")
+			} else {
+				b.WriteString("  " + p + "\n")
+			}
+		}
+		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · esc to go back"))
+
+	case setupPhaseGitProtocol:
+		host := "github.com"
+		if m.gitProvider == "gitlab" {
+			host = "gitlab.com"
+		}
+		b.WriteString("Select a protocol for " + styleCyan.Render(host) + ":\n\n")
+		protocols := []string{"HTTPS", "SSH"}
+		for i, p := range protocols {
+			if i == m.cursor {
+				b.WriteString(styleCursor.Render("> ") + styleBold.Render(p) + "\n")
+			} else {
+				b.WriteString("  " + p + "\n")
+			}
+		}
+		b.WriteString("\n" + styleDim.Render("↑/↓ to move · enter to select · esc to go back"))
+		b.WriteString("\n" + styleDim.Render("Note: SSH requires your public key to be added to your "+host+" account."))
+
+	case setupPhaseGitUsername:
+		b.WriteString("Enter your " + styleCyan.Render(m.gitProvider) + " username:\n\n")
 		b.WriteString("  " + styleCyan.Render(m.inputBuf) + "█\n")
 		b.WriteString("\n" + styleDim.Render("enter to confirm · esc to go back · ctrl+c to quit"))
+
+	case setupPhaseGitRepo:
+		b.WriteString("Enter the repository name:\n\n")
+		b.WriteString("  " + styleCyan.Render(m.inputBuf) + "█\n")
+		b.WriteString("\n" + styleDim.Render("enter to confirm · esc to go back · ctrl+c to quit"))
+		b.WriteString("\n" + styleDim.Render("Leave empty to use the default: ")+styleCyan.Render(".dotfiles"))
 		if m.err != nil {
 			b.WriteString("\n\n" + styleRed.Render(m.err.Error()))
 		}

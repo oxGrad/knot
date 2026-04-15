@@ -1806,30 +1806,72 @@ func TestSetupView_Menu_CursorOnSecondOption(t *testing.T) {
 	}
 }
 
-func TestSetupView_GitURL(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "https://github.com/"}
+func TestSetupView_GitProvider(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProvider}
 	out := m.View()
-	if !containsSubstr(out, "https://github.com/") {
-		t.Error("git URL view should show the current input buffer")
+	if !containsSubstr(out, "GitHub") {
+		t.Error("provider view should show GitHub option")
 	}
-	if !containsSubstr(out, "█") {
-		t.Error("git URL view should show block cursor character")
+	if !containsSubstr(out, "GitLab") {
+		t.Error("provider view should show GitLab option")
 	}
 }
 
-func TestSetupView_GitURL_EmptyInput(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
+func TestSetupView_GitProtocol_GitHub(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProtocol, gitProvider: "github"}
 	out := m.View()
-	if !containsSubstr(out, "█") {
-		t.Error("git URL view should show cursor even with empty input")
+	if !containsSubstr(out, "github.com") {
+		t.Error("protocol view should show provider host")
+	}
+	if !containsSubstr(out, "HTTPS") {
+		t.Error("protocol view should show HTTPS option")
+	}
+	if !containsSubstr(out, "SSH") {
+		t.Error("protocol view should show SSH option")
+	}
+	if !containsSubstr(out, "ssh key") || !containsSubstr(out, "SSH requires") {
+		// either phrasing is fine — just check the SSH note is present
+		if !containsSubstr(strings.ToLower(out), "ssh") {
+			t.Error("protocol view should mention SSH key requirement")
+		}
 	}
 }
 
-func TestSetupView_GitURL_ShowsError(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, err: fmt.Errorf("git clone failed: exit status 128")}
+func TestSetupView_GitProtocol_GitLab(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProtocol, gitProvider: "gitlab"}
+	out := m.View()
+	if !containsSubstr(out, "gitlab.com") {
+		t.Error("protocol view should show gitlab.com when provider is gitlab")
+	}
+}
+
+func TestSetupView_GitUsername(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: "oxGrad", gitProvider: "github"}
+	out := m.View()
+	if !containsSubstr(out, "oxGrad") {
+		t.Error("username view should show the current input buffer")
+	}
+	if !containsSubstr(out, "█") {
+		t.Error("username view should show block cursor")
+	}
+}
+
+func TestSetupView_GitRepo(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitRepo, inputBuf: ""}
+	out := m.View()
+	if !containsSubstr(out, "█") {
+		t.Error("repo view should show block cursor")
+	}
+	if !containsSubstr(out, ".dotfiles") {
+		t.Error("repo view should hint at the default repo name")
+	}
+}
+
+func TestSetupView_GitRepo_ShowsError(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitRepo, err: fmt.Errorf("git clone failed: exit status 128")}
 	out := m.View()
 	if !containsSubstr(out, "git clone failed") {
-		t.Error("git URL view should show error message")
+		t.Error("repo view should show error message")
 	}
 }
 
@@ -1879,7 +1921,16 @@ func TestSetupView_Done(t *testing.T) {
 }
 
 func TestSetupView_AllPhases_NonEmpty(t *testing.T) {
-	phases := []setupPhase{setupPhaseMenu, setupPhaseGitURL, setupPhaseCloning, setupPhaseConfirmKnotfile, setupPhaseDone}
+	phases := []setupPhase{
+		setupPhaseMenu,
+		setupPhaseGitProvider,
+		setupPhaseGitProtocol,
+		setupPhaseGitUsername,
+		setupPhaseGitRepo,
+		setupPhaseCloning,
+		setupPhaseConfirmKnotfile,
+		setupPhaseDone,
+	}
 	for _, phase := range phases {
 		m := setupModel{dir: "/tmp/d", phase: phase}
 		if out := m.View(); out == "" {
@@ -1944,24 +1995,21 @@ func TestSetupUpdateMenu_SelectInitNew(t *testing.T) {
 }
 
 func TestSetupUpdateMenu_SelectGitClone(t *testing.T) {
-	// Option 1 is "Clone from git"
+	// Option 1 is "Clone from git" → goes to provider selection
 	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 1}
 	result, _ := m.updateMenu(keyMsg("enter"))
 	sm := result.(setupModel)
-	if sm.phase != setupPhaseGitURL {
-		t.Errorf("selecting option 1 should advance to setupPhaseGitURL, got phase %d", sm.phase)
-	}
-	if sm.inputBuf != "" {
-		t.Error("inputBuf should be cleared when entering git URL phase")
+	if sm.phase != setupPhaseGitProvider {
+		t.Errorf("selecting option 1 should advance to setupPhaseGitProvider, got phase %d", sm.phase)
 	}
 }
 
 func TestSetupUpdateMenu_SpaceAlsoSelects(t *testing.T) {
-	// Option 1 selected with space → git URL phase
+	// Option 1 selected with space → provider selection
 	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 1}
 	result, _ := m.updateMenu(keyMsg(" "))
 	sm := result.(setupModel)
-	if sm.phase != setupPhaseGitURL {
+	if sm.phase != setupPhaseGitProvider {
 		t.Error("space should also select the highlighted option")
 	}
 }
@@ -1974,77 +2022,231 @@ func TestSetupUpdateMenu_QuitKey(t *testing.T) {
 	}
 }
 
-// ── setupModel.updateGitURL ───────────────────────────────────────────────────
+// ── setupModel.updateGitProvider ─────────────────────────────────────────────
 
-func TestSetupUpdateGitURL_TypesCharacters(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
-	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
-	result, _ = result.(setupModel).updateGitURL(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
-	if result.(setupModel).inputBuf != "hi" {
-		t.Errorf("expected inputBuf='hi', got %q", result.(setupModel).inputBuf)
+func TestSetupUpdateGitProvider_SelectGitHub(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProvider, cursor: 0}
+	result, _ := m.updateGitProvider(keyMsg("enter"))
+	sm := result.(setupModel)
+	if sm.gitProvider != "github" {
+		t.Errorf("cursor=0 should select github, got %q", sm.gitProvider)
+	}
+	if sm.phase != setupPhaseGitProtocol {
+		t.Errorf("should advance to setupPhaseGitProtocol, got %d", sm.phase)
 	}
 }
 
-func TestSetupUpdateGitURL_Backspace(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "abc"}
-	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyBackspace})
+func TestSetupUpdateGitProvider_SelectGitLab(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProvider, cursor: 1}
+	result, _ := m.updateGitProvider(keyMsg("enter"))
+	sm := result.(setupModel)
+	if sm.gitProvider != "gitlab" {
+		t.Errorf("cursor=1 should select gitlab, got %q", sm.gitProvider)
+	}
+}
+
+func TestSetupUpdateGitProvider_Navigate(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProvider, cursor: 0}
+	result, _ := m.updateGitProvider(keyMsg("j"))
+	if result.(setupModel).cursor != 1 {
+		t.Error("'j' should move cursor to 1")
+	}
+	result, _ = result.(setupModel).updateGitProvider(keyMsg("k"))
+	if result.(setupModel).cursor != 0 {
+		t.Error("'k' should move cursor back to 0")
+	}
+}
+
+func TestSetupUpdateGitProvider_EscGoesBackToMenu(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProvider}
+	result, _ := m.updateGitProvider(keyMsg("esc"))
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseMenu {
+		t.Errorf("esc should return to setupPhaseMenu, got %d", sm.phase)
+	}
+	if sm.cursor != 1 {
+		t.Error("esc should restore cursor to 1 (Clone option) in main menu")
+	}
+}
+
+// ── setupModel.updateGitProtocol ─────────────────────────────────────────────
+
+func TestSetupUpdateGitProtocol_SelectHTTPS(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProtocol, cursor: 0}
+	result, _ := m.updateGitProtocol(keyMsg("enter"))
+	sm := result.(setupModel)
+	if sm.gitProtocol != "https" {
+		t.Errorf("cursor=0 should select https, got %q", sm.gitProtocol)
+	}
+	if sm.phase != setupPhaseGitUsername {
+		t.Errorf("should advance to setupPhaseGitUsername, got %d", sm.phase)
+	}
+}
+
+func TestSetupUpdateGitProtocol_SelectSSH(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProtocol, cursor: 1}
+	result, _ := m.updateGitProtocol(keyMsg("enter"))
+	sm := result.(setupModel)
+	if sm.gitProtocol != "ssh" {
+		t.Errorf("cursor=1 should select ssh, got %q", sm.gitProtocol)
+	}
+}
+
+func TestSetupUpdateGitProtocol_EscGoesBackToProvider(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitProtocol}
+	result, _ := m.updateGitProtocol(keyMsg("esc"))
+	if result.(setupModel).phase != setupPhaseGitProvider {
+		t.Error("esc should return to setupPhaseGitProvider")
+	}
+}
+
+// ── setupModel.updateGitInput (username + repo) ───────────────────────────────
+
+func TestSetupUpdateGitInput_TypesCharacters(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: ""}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")}, setupPhaseGitProtocol, setupPhaseGitRepo)
+	result, _ = result.(setupModel).updateGitInput(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b")}, setupPhaseGitProtocol, setupPhaseGitRepo)
+	if result.(setupModel).inputBuf != "ab" {
+		t.Errorf("expected inputBuf='ab', got %q", result.(setupModel).inputBuf)
+	}
+}
+
+func TestSetupUpdateGitInput_Backspace(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: "abc"}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyBackspace}, setupPhaseGitProtocol, setupPhaseGitRepo)
 	if result.(setupModel).inputBuf != "ab" {
 		t.Errorf("backspace should remove last char, got %q", result.(setupModel).inputBuf)
 	}
 }
 
-func TestSetupUpdateGitURL_BackspaceOnEmpty(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
-	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyBackspace})
+func TestSetupUpdateGitInput_BackspaceOnEmpty(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: ""}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyBackspace}, setupPhaseGitProtocol, setupPhaseGitRepo)
 	if result.(setupModel).inputBuf != "" {
-		t.Error("backspace on empty input should be a no-op")
+		t.Error("backspace on empty should be a no-op")
 	}
 }
 
-func TestSetupUpdateGitURL_EnterSubmitsURL(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "https://github.com/user/dots"}
-	result, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEnter})
+func TestSetupUpdateGitInput_EnterUsername_AdvancesToRepo(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: "oxGrad"}
+	result, cmd := m.updateGitInput(tea.KeyMsg{Type: tea.KeyEnter}, setupPhaseGitProtocol, setupPhaseGitRepo)
 	sm := result.(setupModel)
-	if sm.phase != setupPhaseCloning {
-		t.Errorf("enter should advance to setupPhaseCloning, got %d", sm.phase)
+	if sm.gitUsername != "oxGrad" {
+		t.Errorf("gitUsername should be set, got %q", sm.gitUsername)
 	}
-	if sm.cloneURL != "https://github.com/user/dots" {
-		t.Errorf("cloneURL should be set, got %q", sm.cloneURL)
-	}
-	if cmd == nil {
-		t.Error("enter should dispatch cloneRepoCmd (non-nil tea.Cmd)")
-	}
-}
-
-func TestSetupUpdateGitURL_EnterWithWhitespaceOnlyIsNoop(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "   "}
-	result, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEnter})
-	sm := result.(setupModel)
-	if sm.phase != setupPhaseGitURL {
-		t.Error("enter with blank URL should not advance phase")
+	if sm.phase != setupPhaseGitRepo {
+		t.Errorf("should advance to setupPhaseGitRepo, got %d", sm.phase)
 	}
 	if cmd != nil {
-		t.Error("enter with blank URL should not dispatch any command")
+		t.Error("advancing to repo phase should not dispatch any command")
 	}
 }
 
-func TestSetupUpdateGitURL_EscGoesBackToMenu(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "some-url", err: fmt.Errorf("prev error")}
-	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEsc})
+func TestSetupUpdateGitInput_EnterUsernameEmpty_IsNoop(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: "   "}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyEnter}, setupPhaseGitProtocol, setupPhaseGitRepo)
+	if result.(setupModel).phase != setupPhaseGitUsername {
+		t.Error("blank username should not advance phase")
+	}
+}
+
+func TestSetupUpdateGitInput_EnterRepo_StartsClone(t *testing.T) {
+	m := setupModel{
+		dir: "/tmp/d", phase: setupPhaseGitRepo,
+		gitProvider: "github", gitProtocol: "https", gitUsername: "user",
+		inputBuf: "dotfiles",
+	}
+	result, cmd := m.updateGitInput(tea.KeyMsg{Type: tea.KeyEnter}, setupPhaseGitUsername, setupPhaseGitRepo)
 	sm := result.(setupModel)
-	if sm.phase != setupPhaseMenu {
-		t.Errorf("esc should return to setupPhaseMenu, got %d", sm.phase)
+	if sm.phase != setupPhaseCloning {
+		t.Errorf("should advance to setupPhaseCloning, got %d", sm.phase)
+	}
+	if sm.cloneURL != "https://github.com/user/dotfiles" {
+		t.Errorf("unexpected cloneURL: %q", sm.cloneURL)
+	}
+	if cmd == nil {
+		t.Error("repo enter should dispatch cloneRepoCmd")
+	}
+}
+
+func TestSetupUpdateGitInput_EnterRepoEmpty_UsesDefault(t *testing.T) {
+	m := setupModel{
+		dir: "/tmp/d", phase: setupPhaseGitRepo,
+		gitProvider: "github", gitProtocol: "https", gitUsername: "user",
+		inputBuf: "",
+	}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyEnter}, setupPhaseGitUsername, setupPhaseGitRepo)
+	sm := result.(setupModel)
+	if sm.gitRepo != ".dotfiles" {
+		t.Errorf("empty repo input should default to '.dotfiles', got %q", sm.gitRepo)
+	}
+	if sm.cloneURL != "https://github.com/user/.dotfiles" {
+		t.Errorf("unexpected cloneURL: %q", sm.cloneURL)
+	}
+}
+
+func TestSetupUpdateGitInput_EscGoesBack(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername, inputBuf: "some text", err: fmt.Errorf("prev")}
+	result, _ := m.updateGitInput(tea.KeyMsg{Type: tea.KeyEsc}, setupPhaseGitProtocol, setupPhaseGitRepo)
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseGitProtocol {
+		t.Errorf("esc should go to backPhase (setupPhaseGitProtocol), got %d", sm.phase)
+	}
+	if sm.inputBuf != "" {
+		t.Error("esc should clear inputBuf")
 	}
 	if sm.err != nil {
-		t.Error("esc should clear the previous error")
+		t.Error("esc should clear error")
 	}
 }
 
-func TestSetupUpdateGitURL_CtrlCQuits(t *testing.T) {
-	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL}
-	_, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyCtrlC})
+func TestSetupUpdateGitInput_CtrlCQuits(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitUsername}
+	_, cmd := m.updateGitInput(tea.KeyMsg{Type: tea.KeyCtrlC}, setupPhaseGitProtocol, setupPhaseGitRepo)
 	if cmd == nil {
-		t.Error("ctrl+c should return tea.Quit command")
+		t.Error("ctrl+c should return tea.Quit")
+	}
+}
+
+// ── buildGitURL ───────────────────────────────────────────────────────────────
+
+func TestBuildGitURL_GitHubHTTPS(t *testing.T) {
+	got := buildGitURL("github", "https", "user", "dots")
+	want := "https://github.com/user/dots"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildGitURL_GitHubSSH(t *testing.T) {
+	got := buildGitURL("github", "ssh", "user", "dots")
+	want := "git@github.com:user/dots.git"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildGitURL_GitLabHTTPS(t *testing.T) {
+	got := buildGitURL("gitlab", "https", "user", "dots")
+	want := "https://gitlab.com/user/dots"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildGitURL_GitLabSSH(t *testing.T) {
+	got := buildGitURL("gitlab", "ssh", "user", "dots")
+	want := "git@gitlab.com:user/dots.git"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildGitURL_EmptyRepoDefaultsToDotfiles(t *testing.T) {
+	got := buildGitURL("github", "https", "user", "")
+	want := "https://github.com/user/.dotfiles"
+	if got != want {
+		t.Errorf("empty repo should default to .dotfiles, got %q", got)
 	}
 }
 
@@ -2106,8 +2308,8 @@ func TestSetupUpdate_CloneDone_WithError(t *testing.T) {
 	m := setupModel{dir: "/tmp/d", phase: setupPhaseCloning, cloneURL: "bad-url"}
 	result, _ := m.Update(cloneDoneMsg{err: fmt.Errorf("git clone failed: exit 128")})
 	sm := result.(setupModel)
-	if sm.phase != setupPhaseGitURL {
-		t.Errorf("clone failure should return to setupPhaseGitURL, got %d", sm.phase)
+	if sm.phase != setupPhaseGitRepo {
+		t.Errorf("clone failure should return to setupPhaseGitRepo, got %d", sm.phase)
 	}
 	if sm.err == nil {
 		t.Error("clone failure should set err on the model")
