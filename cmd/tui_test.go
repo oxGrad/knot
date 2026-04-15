@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -1737,4 +1738,516 @@ func containsSubstr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// ── setupModel.Init ───────────────────────────────────────────────────────────
+
+func TestSetupModel_Init_ReturnsNil(t *testing.T) {
+	m := setupModel{dir: "/tmp/dotfiles"}
+	if cmd := m.Init(); cmd != nil {
+		t.Error("Init() should return nil for setup wizard")
+	}
+}
+
+// ── setupModel.View ───────────────────────────────────────────────────────────
+
+func TestSetupView_Menu(t *testing.T) {
+	m := setupModel{dir: "/home/user/.dotfiles", phase: setupPhaseMenu}
+	out := m.View()
+	if !containsSubstr(out, "knot setup") {
+		t.Error("menu view should contain 'knot setup' header")
+	}
+	if !containsSubstr(out, "/home/user/.dotfiles") {
+		t.Error("menu view should show the target directory")
+	}
+	if !containsSubstr(out, "Clone existing dotfiles from git") {
+		t.Error("menu view should show git clone option")
+	}
+	if !containsSubstr(out, "Initialize new dotfiles folder") {
+		t.Error("menu view should show init option")
+	}
+}
+
+func TestSetupView_Menu_CursorOnFirstOption(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 0}
+	out := m.View()
+	// The cursor indicator should appear before the first option
+	cloneIdx := strings.Index(out, "Clone existing")
+	initIdx := strings.Index(out, "Initialize new")
+	cursorIdx := strings.Index(out, ">")
+	if cursorIdx < 0 {
+		t.Fatal("cursor indicator '>' not found")
+	}
+	if cursorIdx > cloneIdx {
+		t.Error("cursor should be before 'Clone existing' when cursor=0")
+	}
+	if cursorIdx < initIdx {
+		// cursor before clone option, not init — fine
+	}
+}
+
+func TestSetupView_Menu_CursorOnSecondOption(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 1}
+	out := m.View()
+	cloneIdx := strings.Index(out, "Clone existing")
+	initIdx := strings.Index(out, "Initialize new")
+	cursorIdx := strings.LastIndex(out, ">")
+	if cursorIdx < 0 {
+		t.Fatal("cursor indicator '>' not found")
+	}
+	if cursorIdx < cloneIdx || cursorIdx > initIdx {
+		t.Error("cursor should appear between Clone and Initialize lines when cursor=1")
+	}
+}
+
+func TestSetupView_GitURL(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "https://github.com/"}
+	out := m.View()
+	if !containsSubstr(out, "https://github.com/") {
+		t.Error("git URL view should show the current input buffer")
+	}
+	if !containsSubstr(out, "█") {
+		t.Error("git URL view should show block cursor character")
+	}
+}
+
+func TestSetupView_GitURL_EmptyInput(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
+	out := m.View()
+	if !containsSubstr(out, "█") {
+		t.Error("git URL view should show cursor even with empty input")
+	}
+}
+
+func TestSetupView_GitURL_ShowsError(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, err: fmt.Errorf("git clone failed: exit status 128")}
+	out := m.View()
+	if !containsSubstr(out, "git clone failed") {
+		t.Error("git URL view should show error message")
+	}
+}
+
+func TestSetupView_Cloning(t *testing.T) {
+	m := setupModel{
+		dir:      "/home/user/.dotfiles",
+		phase:    setupPhaseCloning,
+		cloneURL: "https://github.com/user/dots",
+	}
+	out := m.View()
+	if !containsSubstr(out, "https://github.com/user/dots") {
+		t.Error("cloning view should show the URL being cloned")
+	}
+	if !containsSubstr(out, "/home/user/.dotfiles") {
+		t.Error("cloning view should show the target directory")
+	}
+}
+
+func TestSetupView_KnotfileChoice(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile}
+	out := m.View()
+	if !containsSubstr(out, "No Knotfile") {
+		t.Error("knotfile choice view should mention missing Knotfile")
+	}
+	if !containsSubstr(out, "Load from template") {
+		t.Error("knotfile choice view should show template option")
+	}
+	if !containsSubstr(out, "Create empty Knotfile") {
+		t.Error("knotfile choice view should show empty option")
+	}
+}
+
+func TestSetupView_KnotfileChoice_ShowsError(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile, err: fmt.Errorf("writing Knotfile: permission denied")}
+	out := m.View()
+	if !containsSubstr(out, "writing Knotfile") {
+		t.Error("knotfile choice view should show error when present")
+	}
+}
+
+func TestSetupView_Done(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseDone}
+	out := m.View()
+	if !containsSubstr(out, "Setup complete") {
+		t.Error("done view should say 'Setup complete'")
+	}
+}
+
+func TestSetupView_AllPhases_NonEmpty(t *testing.T) {
+	phases := []setupPhase{setupPhaseMenu, setupPhaseGitURL, setupPhaseCloning, setupPhaseKnotfile, setupPhaseDone}
+	for _, phase := range phases {
+		m := setupModel{dir: "/tmp/d", phase: phase}
+		if out := m.View(); out == "" {
+			t.Errorf("View() returned empty string for setupPhase %d", phase)
+		}
+	}
+}
+
+// ── setupModel.Update — WindowSizeMsg ─────────────────────────────────────────
+
+func TestSetupUpdate_WindowSize(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu}
+	result, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	sm := result.(setupModel)
+	if sm.width != 120 {
+		t.Errorf("expected width=120 after WindowSizeMsg, got %d", sm.width)
+	}
+}
+
+// ── setupModel.updateMenu ─────────────────────────────────────────────────────
+
+func TestSetupUpdateMenu_NavigateDown(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 0}
+	result, _ := m.updateMenu(keyMsg("j"))
+	if result.(setupModel).cursor != 1 {
+		t.Error("'j' should move cursor from 0 to 1")
+	}
+}
+
+func TestSetupUpdateMenu_NavigateDownAtBottom(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 1}
+	result, _ := m.updateMenu(keyMsg("j"))
+	if result.(setupModel).cursor != 1 {
+		t.Error("cursor should stay at 1 when already at bottom")
+	}
+}
+
+func TestSetupUpdateMenu_NavigateUp(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 1}
+	result, _ := m.updateMenu(keyMsg("k"))
+	if result.(setupModel).cursor != 0 {
+		t.Error("'k' should move cursor from 1 to 0")
+	}
+}
+
+func TestSetupUpdateMenu_NavigateUpAtTop(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 0}
+	result, _ := m.updateMenu(keyMsg("k"))
+	if result.(setupModel).cursor != 0 {
+		t.Error("cursor should stay at 0 when already at top")
+	}
+}
+
+func TestSetupUpdateMenu_SelectGitClone(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 0}
+	result, _ := m.updateMenu(keyMsg("enter"))
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseGitURL {
+		t.Errorf("selecting option 0 should advance to setupPhaseGitURL, got phase %d", sm.phase)
+	}
+	if sm.inputBuf != "" {
+		t.Error("inputBuf should be cleared when entering git URL phase")
+	}
+}
+
+func TestSetupUpdateMenu_SelectInitNew(t *testing.T) {
+	dir := t.TempDir()
+	m := setupModel{dir: dir, phase: setupPhaseMenu, cursor: 1}
+	result, cmd := m.updateMenu(keyMsg("enter"))
+	sm := result.(setupModel)
+	// Selecting init new should dispatch writeKnotfileCmd (cmd non-nil)
+	if cmd == nil {
+		t.Error("selecting 'Initialize new' should return a non-nil tea.Cmd")
+	}
+	// Phase stays at menu until knotfileReadyMsg arrives
+	if sm.phase != setupPhaseMenu {
+		t.Errorf("phase should remain setupPhaseMenu until write completes, got %d", sm.phase)
+	}
+}
+
+func TestSetupUpdateMenu_SpaceAlsoSelects(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu, cursor: 0}
+	result, _ := m.updateMenu(keyMsg(" "))
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseGitURL {
+		t.Error("space should also select the highlighted option")
+	}
+}
+
+func TestSetupUpdateMenu_QuitKey(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseMenu}
+	_, cmd := m.updateMenu(keyMsg("q"))
+	if cmd == nil {
+		t.Error("'q' should return tea.Quit command")
+	}
+}
+
+// ── setupModel.updateGitURL ───────────────────────────────────────────────────
+
+func TestSetupUpdateGitURL_TypesCharacters(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
+	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	result, _ = result.(setupModel).updateGitURL(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	if result.(setupModel).inputBuf != "hi" {
+		t.Errorf("expected inputBuf='hi', got %q", result.(setupModel).inputBuf)
+	}
+}
+
+func TestSetupUpdateGitURL_Backspace(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "abc"}
+	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyBackspace})
+	if result.(setupModel).inputBuf != "ab" {
+		t.Errorf("backspace should remove last char, got %q", result.(setupModel).inputBuf)
+	}
+}
+
+func TestSetupUpdateGitURL_BackspaceOnEmpty(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: ""}
+	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyBackspace})
+	if result.(setupModel).inputBuf != "" {
+		t.Error("backspace on empty input should be a no-op")
+	}
+}
+
+func TestSetupUpdateGitURL_EnterSubmitsURL(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "https://github.com/user/dots"}
+	result, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEnter})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseCloning {
+		t.Errorf("enter should advance to setupPhaseCloning, got %d", sm.phase)
+	}
+	if sm.cloneURL != "https://github.com/user/dots" {
+		t.Errorf("cloneURL should be set, got %q", sm.cloneURL)
+	}
+	if cmd == nil {
+		t.Error("enter should dispatch cloneRepoCmd (non-nil tea.Cmd)")
+	}
+}
+
+func TestSetupUpdateGitURL_EnterWithWhitespaceOnlyIsNoop(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "   "}
+	result, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEnter})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseGitURL {
+		t.Error("enter with blank URL should not advance phase")
+	}
+	if cmd != nil {
+		t.Error("enter with blank URL should not dispatch any command")
+	}
+}
+
+func TestSetupUpdateGitURL_EscGoesBackToMenu(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL, inputBuf: "some-url", err: fmt.Errorf("prev error")}
+	result, _ := m.updateGitURL(tea.KeyMsg{Type: tea.KeyEsc})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseMenu {
+		t.Errorf("esc should return to setupPhaseMenu, got %d", sm.phase)
+	}
+	if sm.err != nil {
+		t.Error("esc should clear the previous error")
+	}
+}
+
+func TestSetupUpdateGitURL_CtrlCQuits(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseGitURL}
+	_, cmd := m.updateGitURL(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Error("ctrl+c should return tea.Quit command")
+	}
+}
+
+// ── setupModel.updateKnotfileChoice ──────────────────────────────────────────
+
+func TestSetupUpdateKnotfile_NavigateDown(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile, cursor: 0}
+	result, _ := m.updateKnotfileChoice(keyMsg("j"))
+	if result.(setupModel).cursor != 1 {
+		t.Error("'j' should move cursor to 1")
+	}
+}
+
+func TestSetupUpdateKnotfile_NavigateDownAtBottom(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile, cursor: 1}
+	result, _ := m.updateKnotfileChoice(keyMsg("j"))
+	if result.(setupModel).cursor != 1 {
+		t.Error("cursor should not exceed 1")
+	}
+}
+
+func TestSetupUpdateKnotfile_NavigateUp(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile, cursor: 1}
+	result, _ := m.updateKnotfileChoice(keyMsg("k"))
+	if result.(setupModel).cursor != 0 {
+		t.Error("'k' should move cursor to 0")
+	}
+}
+
+func TestSetupUpdateKnotfile_SelectTemplate(t *testing.T) {
+	dir := t.TempDir()
+	m := setupModel{dir: dir, phase: setupPhaseKnotfile, cursor: 0}
+	_, cmd := m.updateKnotfileChoice(keyMsg("enter"))
+	if cmd == nil {
+		t.Error("selecting template should dispatch writeKnotfileCmd (non-nil)")
+	}
+}
+
+func TestSetupUpdateKnotfile_SelectEmpty(t *testing.T) {
+	dir := t.TempDir()
+	m := setupModel{dir: dir, phase: setupPhaseKnotfile, cursor: 1}
+	_, cmd := m.updateKnotfileChoice(keyMsg("enter"))
+	if cmd == nil {
+		t.Error("selecting empty Knotfile should dispatch writeKnotfileCmd (non-nil)")
+	}
+}
+
+func TestSetupUpdateKnotfile_QuitKey(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile}
+	_, cmd := m.updateKnotfileChoice(keyMsg("q"))
+	if cmd == nil {
+		t.Error("'q' should return tea.Quit command")
+	}
+}
+
+// ── setupModel.Update — message handling ─────────────────────────────────────
+
+func TestSetupUpdate_CloneDone_WithError(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseCloning, cloneURL: "bad-url"}
+	result, _ := m.Update(cloneDoneMsg{err: fmt.Errorf("git clone failed: exit 128")})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseGitURL {
+		t.Errorf("clone failure should return to setupPhaseGitURL, got %d", sm.phase)
+	}
+	if sm.err == nil {
+		t.Error("clone failure should set err on the model")
+	}
+}
+
+func TestSetupUpdate_CloneDone_KnotfilePresent(t *testing.T) {
+	dir := t.TempDir()
+	knotfilePath := filepath.Join(dir, config.KnotfileName)
+	if err := os.WriteFile(knotfilePath, []byte("packages: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	m := setupModel{dir: dir, phase: setupPhaseCloning}
+	result, cmd := m.Update(cloneDoneMsg{})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseDone {
+		t.Errorf("successful clone with Knotfile should advance to setupPhaseDone, got %d", sm.phase)
+	}
+	if cmd == nil {
+		t.Error("should return tea.Quit after successful clone with Knotfile")
+	}
+}
+
+func TestSetupUpdate_CloneDone_NoKnotfile(t *testing.T) {
+	dir := t.TempDir()
+	// No Knotfile written — dir is empty
+	m := setupModel{dir: dir, phase: setupPhaseCloning}
+	result, _ := m.Update(cloneDoneMsg{})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseKnotfile {
+		t.Errorf("clone without Knotfile should advance to setupPhaseKnotfile, got %d", sm.phase)
+	}
+	if sm.cursor != 0 {
+		t.Error("cursor should reset to 0 when entering knotfile choice phase")
+	}
+}
+
+func TestSetupUpdate_KnotfileReady_Success(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile}
+	result, cmd := m.Update(knotfileReadyMsg{})
+	sm := result.(setupModel)
+	if sm.phase != setupPhaseDone {
+		t.Errorf("successful write should advance to setupPhaseDone, got %d", sm.phase)
+	}
+	if cmd == nil {
+		t.Error("should return tea.Quit after Knotfile written")
+	}
+}
+
+func TestSetupUpdate_KnotfileReady_Error(t *testing.T) {
+	m := setupModel{dir: "/tmp/d", phase: setupPhaseKnotfile}
+	result, _ := m.Update(knotfileReadyMsg{err: fmt.Errorf("permission denied")})
+	sm := result.(setupModel)
+	if sm.err == nil {
+		t.Error("write failure should set err on the model")
+	}
+	if sm.phase == setupPhaseDone {
+		t.Error("phase should not advance to done on write error")
+	}
+}
+
+// ── writeKnotfileCmd ──────────────────────────────────────────────────────────
+
+func TestWriteKnotfileCmd_Template(t *testing.T) {
+	dir := t.TempDir()
+	cmd := writeKnotfileCmd(dir, true)
+	msg := cmd()
+	result, ok := msg.(knotfileReadyMsg)
+	if !ok {
+		t.Fatalf("expected knotfileReadyMsg, got %T", msg)
+	}
+	if result.err != nil {
+		t.Fatalf("unexpected error: %v", result.err)
+	}
+	knotfilePath := filepath.Join(dir, config.KnotfileName)
+	content, err := os.ReadFile(knotfilePath)
+	if err != nil {
+		t.Fatalf("Knotfile not written: %v", err)
+	}
+	// Template should contain more than the bare minimum
+	if len(content) <= len("packages: {}\n") {
+		t.Error("template Knotfile should have more content than an empty one")
+	}
+}
+
+func TestWriteKnotfileCmd_Empty(t *testing.T) {
+	dir := t.TempDir()
+	cmd := writeKnotfileCmd(dir, false)
+	msg := cmd()
+	result, ok := msg.(knotfileReadyMsg)
+	if !ok {
+		t.Fatalf("expected knotfileReadyMsg, got %T", msg)
+	}
+	if result.err != nil {
+		t.Fatalf("unexpected error: %v", result.err)
+	}
+	knotfilePath := filepath.Join(dir, config.KnotfileName)
+	content, err := os.ReadFile(knotfilePath)
+	if err != nil {
+		t.Fatalf("Knotfile not written: %v", err)
+	}
+	if string(content) != "packages: {}\n" {
+		t.Errorf("empty Knotfile should contain 'packages: {}\\n', got %q", string(content))
+	}
+}
+
+func TestWriteKnotfileCmd_CreatesDirectory(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "nested", "dotfiles")
+	cmd := writeKnotfileCmd(dir, false)
+	msg := cmd()
+	result := msg.(knotfileReadyMsg)
+	if result.err != nil {
+		t.Fatalf("unexpected error creating nested dir: %v", result.err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, config.KnotfileName)); err != nil {
+		t.Error("Knotfile should exist after writeKnotfileCmd creates nested dirs")
+	}
+}
+
+func TestWriteKnotfileCmd_EmptyIsValidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cmd := writeKnotfileCmd(dir, false)
+	cmd()
+	knotfilePath := filepath.Join(dir, config.KnotfileName)
+	_, err := config.Load(knotfilePath)
+	if err != nil {
+		t.Errorf("empty Knotfile should be valid YAML parseable by config.Load: %v", err)
+	}
+}
+
+// ── cloneRepoCmd ──────────────────────────────────────────────────────────────
+
+func TestCloneRepoCmd_InvalidURL(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "clone")
+	cmd := cloneRepoCmd("not-a-real-url-xyz123", target)
+	msg := cmd()
+	result, ok := msg.(cloneDoneMsg)
+	if !ok {
+		t.Fatalf("expected cloneDoneMsg, got %T", msg)
+	}
+	if result.err == nil {
+		t.Error("cloneRepoCmd with invalid URL should return an error")
+	}
 }
