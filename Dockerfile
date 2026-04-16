@@ -9,31 +9,28 @@ FROM ubuntu:24.04 AS ubuntu
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates bash zsh neovim \
   && rm -rf /var/lib/apt/lists/*
-RUN groupadd -g 1001 knot-user && useradd -u 1001 -g 1001 -m -s /bin/zsh knot-user
+RUN groupadd -g 1001 oxGrad && useradd -u 1001 -g 1001 -m -s /bin/zsh oxGrad
 COPY --from=build /knot /usr/local/bin/knot
-ENV KNOT_DIR=/home/knot-user/dotfiles
-USER knot-user
-WORKDIR /home/knot-user
+USER oxGrad
+WORKDIR /home/oxGrad
 CMD ["zsh"]
 
 # ── Stage 2b: fedora ──────────────────────────────────────────────────────────
 FROM fedora:40 AS fedora
 RUN dnf install -y git ca-certificates bash zsh neovim \
   && dnf clean all
-RUN groupadd -g 1001 knot-user && useradd -u 1001 -g 1001 -m -s /bin/bash knot-user
+RUN groupadd -g 1001 oxGrad && useradd -u 1001 -g 1001 -m -s /bin/bash oxGrad
 COPY --from=build /knot /usr/local/bin/knot
-ENV KNOT_DIR=/home/knot-user/dotfiles
-USER knot-user
-WORKDIR /home/knot-user
+USER oxGrad
+WORKDIR /home/oxGrad
 CMD ["zsh"]
 
 # ── Stage 2c: arch ────────────────────────────────────────────────────────────
 FROM archlinux:latest AS arch
 RUN pacman -Sy --noconfirm git ca-certificates bash zsh neovim \
   && pacman -Sc --noconfirm
-RUN groupadd -g 1001 knot-user && useradd -u 1001 -g 1001 -m -s /bin/bash knot-user
+RUN groupadd -g 1001 oxGrad && useradd -u 1001 -g 1001 -m -s /bin/bash oxGrad
 COPY --from=build /knot /usr/local/bin/knot
-ENV KNOT_DIR=/home/knot-user/dotfiles
-USER knot-user
-WORKDIR /home/knot-user
+USER oxGrad
+WORKDIR /home/oxGrad
 CMD ["zsh"]
