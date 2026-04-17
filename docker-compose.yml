@@ -2,37 +2,23 @@ services:
   knot-ubuntu:
     build:
       context: .
+      no_cache: true
       target: ubuntu
     stdin_open: true
     tty: true
-    environment:
-      - KNOT_DIR=/home/knot-user/dotfiles
-    volumes:
-      - knot-ubuntu-home:/home/knot-user
 
   knot-fedora:
     build:
       context: .
+      no_cache: true
       target: fedora
     stdin_open: true
     tty: true
-    environment:
-      - KNOT_DIR=/home/knot-user/dotfiles
-    volumes:
-      - knot-fedora-home:/home/knot-user
 
   knot-arch:
     build:
       context: .
+      no_cache: true
       target: arch
     stdin_open: true
     tty: true
-    environment:
-      - KNOT_DIR=/home/knot-user/dotfiles
-    volumes:
-      - knot-arch-home:/home/knot-user
-
-volumes:
-  knot-ubuntu-home:
-  knot-fedora-home:
-  knot-arch-home:

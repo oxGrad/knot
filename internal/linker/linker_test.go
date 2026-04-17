@@ -379,9 +379,12 @@ func TestPlan_SourceNotExist(t *testing.T) {
 		},
 	}
 
-	_, err := l.Plan(cfg, []string{"nvim"})
-	if err == nil {
-		t.Error("expected error when source directory does not exist")
+	actions, err := l.Plan(cfg, []string{"nvim"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Op != OpSourceNotFound {
+		t.Errorf("expected single OpSourceNotFound action, got %v", actions)
 	}
 }
 
