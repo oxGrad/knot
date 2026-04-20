@@ -31,7 +31,9 @@ func EvaluateCondition(cond *config.Condition, goos string) bool {
 }
 
 // ShouldIgnore returns true if the filename matches any of the given glob patterns.
-// Patterns are matched against the base name of filename only.
+// Patterns are matched against the base name of filename only — path separator
+// components are stripped before matching, so patterns like "lua/*.lua" will
+// never match regardless of the full path.
 func ShouldIgnore(filename string, patterns []string) (bool, error) {
 	base := filepath.Base(filename)
 	for _, pattern := range patterns {

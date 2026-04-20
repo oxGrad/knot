@@ -8,6 +8,16 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	KnotfileName = "Knotfile"
+	EnvKnotDir   = "KNOT_DIR"
+)
+
+// KnownOS is the set of accepted condition.os values.
+var KnownOS = map[string]bool{
+	"darwin": true, "linux": true, "windows": true, "freebsd": true,
+}
+
 // Config is the top-level structure parsed from Knotfile.
 type Config struct {
 	Packages map[string]Package `yaml:"packages"`
@@ -26,8 +36,28 @@ type Condition struct {
 	OS string `yaml:"os"`
 }
 
+// DefaultDir returns the dotfiles directory: $KNOT_DIR if set, else ~/. dotfiles.
+func DefaultDir(homeDir string) string {
+	if d := os.Getenv(EnvKnotDir); d != "" {
+		return d
+	}
+	return filepath.Join(homeDir, ".dotfiles")
+}
+
+// DefaultKnotfilePath returns the default Knotfile path for the given home directory.
+func DefaultKnotfilePath(homeDir string) string {
+	return filepath.Join(DefaultDir(homeDir), KnotfileName)
+}
+
 // Load reads and parses a Knotfile at the given path.
-// All relative paths inside the config are resolved relative to the config file's directory.
+//
+// Path resolution in Load:
+//   - Relative source paths (e.g. "./nvim") are resolved to absolute paths
+//     relative to the Knotfile's directory so the linker always receives
+//     absolute source paths.
+//   - Paths beginning with "~/" (in both source and target) are intentionally
+//     left as-is and expanded later by resolver.ExpandPath, which has access
+//     to the runtime home directory.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -43,11 +73,14 @@ func Load(path string) (*Config, error) {
 		cfg.Packages = make(map[string]Package)
 	}
 
-	// Resolve source paths relative to the config file's directory.
+	// Resolve relative source paths to the Knotfile's directory.
 	dir := filepath.Dir(path)
 	for name, pkg := range cfg.Packages {
-		if pkg.Source != "" && !filepath.IsAbs(pkg.Source) {
+		if pkg.Source != "" && !filepath.IsAbs(pkg.Source) && pkg.Source[0] != '~' {
 			pkg.Source = filepath.Join(dir, pkg.Source)
+		}
+		if pkg.Target != "" && !filepath.IsAbs(pkg.Target) && pkg.Target[0] != '~' {
+			pkg.Target = filepath.Join(dir, pkg.Target)
 		}
 		cfg.Packages[name] = pkg
 	}
@@ -64,15 +97,14 @@ func FindConfigFile(startDir string) (string, error) {
 	}
 
 	for {
-		candidate := filepath.Join(dir, "Knotfile")
+		candidate := filepath.Join(dir, KnotfileName)
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate, nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			// Reached filesystem root without finding the file.
-			return "", fmt.Errorf("Knotfile not found (searched from %q upward)", startDir)
+			return "", fmt.Errorf("knotfile not found (searched from %q upward)", startDir)
 		}
 		dir = parent
 	}
