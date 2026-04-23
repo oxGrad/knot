@@ -919,6 +919,102 @@ func TestPlanPackage_SourceIsFile(t *testing.T) {
 	}
 }
 
+// TestPlan_PerFileMode verifies that a target ending with "/" triggers per-file
+// linking: each source entry gets its own OpCreate action inside the target dir.
+func TestPlan_PerFileMode(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		".zshrc":  "# zsh",
+		".zshenv": "# env",
+	})
+	target := t.TempDir() // pre-existing directory, like ~/
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			// trailing slash signals per-file mode
+			"zsh": {Source: source, Target: target + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"zsh"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	creates := filterOp(actions, OpCreate)
+	if len(creates) != 2 {
+		t.Errorf("expected 2 OpCreate (one per file), got %d: %+v", len(creates), actions)
+	}
+	for _, a := range creates {
+		if a.Source == source || a.Target == target {
+			t.Errorf("per-file action points at whole directory: %+v", a)
+		}
+	}
+}
+
+// TestPlan_PerFileMode_Ignore verifies that ignore patterns are applied in per-file mode.
+func TestPlan_PerFileMode_Ignore(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		".zshrc":    "# zsh",
+		"README.md": "# docs",
+	})
+	target := t.TempDir()
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"zsh": {
+				Source: source,
+				Target: target + "/",
+				Ignore: []string{"README.md"},
+			},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"zsh"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	creates := filterOp(actions, OpCreate)
+	if len(creates) != 1 {
+		t.Errorf("expected 1 OpCreate (.zshrc only), got %d: %+v", len(creates), actions)
+	}
+	skips := filterOp(actions, OpSkip)
+	if len(skips) != 1 {
+		t.Errorf("expected 1 OpSkip (README.md), got %d: %+v", len(skips), actions)
+	}
+}
+
+// TestPlan_PerFileMode_Conflict verifies that a pre-existing file at the target
+// location is reported as OpConflict in per-file mode.
+func TestPlan_PerFileMode_Conflict(t *testing.T) {
+	source := makePackageTree(t, map[string]string{".zshrc": "# zsh"})
+	target := t.TempDir()
+
+	// pre-existing regular file at the would-be symlink location
+	if err := os.WriteFile(filepath.Join(target, ".zshrc"), []byte("existing"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	l := newTestLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"zsh": {Source: source, Target: target + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"zsh"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	conflicts := filterOp(actions, OpConflict)
+	if len(conflicts) != 1 {
+		t.Errorf("expected 1 OpConflict for pre-existing file, got %d: %+v", len(conflicts), actions)
+	}
+}
+
 // containsString is a helper to avoid importing strings in test assertions.
 func containsString(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
