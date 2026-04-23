@@ -5,12 +5,12 @@
 ---   - Treesitter YAML parser override for knotfile buffers
 ---   - Optional automatic yaml-language-server schema configuration
 ---
---- Minimum requirement: Neovim 0.8+
+--- Minimum requirement: Neovim 0.10+
 
 local M = {}
 
 --- The published JSON Schema URL for Knotfile validation.
-M.schema_url = "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json"
+M.schema_url = "https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json"
 
 local defaults = {
   -- Automatically tell yaml-language-server to validate Knotfile buffers

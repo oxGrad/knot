@@ -1,6 +1,6 @@
 # knot.nvim
 
-Neovim plugin for the [knot](https://github.com/oxgrad/knot) dotfiles manager.
+Neovim plugin for the [knot](https://github.com/oxGrad/knot) dotfiles manager.
 
 ## Features
 
@@ -17,7 +17,7 @@ Neovim plugin for the [knot](https://github.com/oxgrad/knot) dotfiles manager.
 
 ## Requirements
 
-- Neovim 0.8+
+- Neovim 0.10+
 - **Optional:** [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig) + [`yaml-language-server`](https://github.com/redhat-developer/yaml-language-server) for schema validation and completions
 - **Optional:** [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter) with `yaml` parser (Neovim 0.9+) for enhanced highlighting
 
@@ -30,7 +30,7 @@ Neovim plugin for the [knot](https://github.com/oxgrad/knot) dotfiles manager.
   -- Path to the neovim plugin directory inside the knot repo:
   dir = vim.fn.expand("~/path/to/knot/editors/neovim"),
   -- Once published as a standalone plugin, replace dir with:
-  -- "oxgrad/knot.nvim",
+  -- "oxGrad/knot.nvim",
   name = "knot.nvim", -- registers the plugin under this name in lazy's registry
   main = "knot",      -- tells lazy.nvim to call require("knot").setup(opts)
   ft   = "knotfile",
@@ -51,7 +51,7 @@ use {
   -- (packer does not expand ~, so vim.fn.expand is required):
   vim.fn.expand("~/path/to/knot/editors/neovim"),
   -- Once published as a standalone plugin, replace with:
-  -- "oxgrad/knot.nvim",
+  -- "oxGrad/knot.nvim",
   ft = { "knotfile" },
   config = function()
     require("knot").setup({
@@ -99,7 +99,7 @@ require("lspconfig").yamlls.setup({
   settings = {
     yaml = {
       schemas = {
-        ["https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json"] = "**/Knotfile",
+        ["https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json"] = "**/Knotfile",
       },
     },
   },
@@ -109,7 +109,7 @@ require("lspconfig").yamlls.setup({
 Or add this modeline as the first line of any `Knotfile`:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
 packages:
   nvim:
     source: ./nvim
@@ -121,7 +121,7 @@ packages:
 The official JSON Schema is published at:
 
 ```
-https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
+https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
 ```
 
 See [`../../schema/knotfile.schema.json`](../../schema/knotfile.schema.json) for the full definition.
