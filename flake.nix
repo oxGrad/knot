@@ -103,7 +103,7 @@
               script = pkgs.writeShellScript "knot-test-${distro}" ''
                 set -euo pipefail
                 echo "==> Building knot-${distro} image..."
-                out=$(${pkgs.lib.getExe' pkgs.nix "nix"} --extra-experimental-features "nix-command flakes" build ".#images.${distro}" --no-link --print-out-paths)
+                out=$(nix --extra-experimental-features "nix-command flakes" build ".#images.${distro}" --no-link --print-out-paths)
                 echo "==> Loading into Docker..."
                 ${pkgs.lib.getExe pkgs.docker} load < "$out"
                 echo "==> Running knot-${distro} (exit or Ctrl-D to quit)..."
