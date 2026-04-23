@@ -85,10 +85,30 @@ packages:
 | Field | Required | Description |
 |---|---|---|
 | `source` | — | Path to source directory (relative to `Knotfile`, or absolute; `~` supported). Defaults to `./<package-name>` |
-| `target` | ✅ | Destination directory where symlinks are created (`~` supported) |
+| `target` | ✅ | Destination path for symlinks (`~` supported). See linking modes below. |
 | `ignore` | — | List of glob patterns matched against file basenames |
 | `tags` | — | List of tag names; enables `--tag` flag and Tags tab in TUI |
 | `condition.os` | — | Only tie on this OS (`darwin`, `linux`, `windows`, `freebsd`) |
+
+### Linking modes
+
+The `target` value controls how knot places symlinks:
+
+**Directory symlink** (default) — knot creates a single symlink at `target` pointing to the entire source directory. Use this when the target path does not yet exist and you want the whole directory to be managed as one unit.
+
+```yaml
+nvim:
+  target: ~/.config/nvim   # creates ~/.config/nvim -> /dotfiles/nvim
+```
+
+**Per-file mode** — add a trailing `/` to `target`. Knot links each file in the source directory individually into `target`. This is required when `target` is a directory that must already exist (like `~/` or `~/.config/`), and also respects `ignore` patterns.
+
+```yaml
+zsh:
+  target: ~/               # links ~/dotfiles/zsh/.zshrc -> ~/.zshrc, etc.
+  ignore:
+    - "README.md"
+```
 
 A [JSON Schema](schema/knotfile.schema.json) is available for editor validation and auto-complete — see [Editor Integration](#editor-integration).
 
