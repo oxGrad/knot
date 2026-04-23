@@ -17,5 +17,5 @@ setlocal textwidth=0
 " Uncomment the block below to insert the modeline automatically on first open:
 "
 " if !search('yaml-language-server: \$schema=', 'nw')
-"   call append(0, '# yaml-language-server: $schema=https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json')
+"   call append(0, '# yaml-language-server: $schema=https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json')
 " endif

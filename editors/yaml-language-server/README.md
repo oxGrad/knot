@@ -4,7 +4,7 @@ The `Knotfile` format is YAML. The [yaml-language-server](https://github.com/red
 
 **Schema URL:**
 ```
-https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
+https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
 ```
 
 ---
@@ -14,7 +14,7 @@ https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
 Add this comment as the **first line** of any `Knotfile`. `yaml-language-server` detects the `$schema` modeline automatically, regardless of editor configuration:
 
 ```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
 packages:
   nvim:
     source: ./nvim
@@ -40,7 +40,7 @@ require("lspconfig").yamlls.setup({
   settings = {
     yaml = {
       schemas = {
-        ["https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json"] = "**/Knotfile",
+        ["https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json"] = "**/Knotfile",
       },
     },
   },
@@ -58,7 +58,7 @@ Copy the contents of `settings.json` (in this directory) into your workspace's `
 ```json
 {
   "yaml.schemas": {
-    "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json": "**/Knotfile"
+    "https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json": "**/Knotfile"
   },
   "yaml.validate": true,
   "yaml.completion": true,
@@ -77,7 +77,7 @@ Some editors expose yamlls settings globally. Add the schema association to whic
 ```json
 {
   "schemas": {
-    "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json": ["**/Knotfile", "Knotfile"]
+    "https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json": ["**/Knotfile", "Knotfile"]
   }
 }
 ```
