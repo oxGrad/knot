@@ -70,8 +70,29 @@
             sha256      = "sha256-BTyUgdu47go+6EQxGRim0KlknaqbguxPyhTLVL7DDbQ=";
             tag         = "latest";
           };
+
+          mkImage = { name, base }:
+            pkgs.dockerTools.buildLayeredImage {
+              inherit name;
+              tag = "latest";
+              fromImage = base;
+              config = {
+                WorkingDir = "/root";
+                Cmd = [ "/bin/bash" ];
+              };
+              extraCommands = ''
+                mkdir -p usr/local/bin
+                cp ${knotBin}/bin/knot usr/local/bin/knot
+                chmod 755 usr/local/bin/knot
+              '';
+            };
         in {
           default = knotBin;
+          images = {
+            ubuntu = mkImage { name = "knot-ubuntu"; base = ubuntuBase; };
+            fedora = mkImage { name = "knot-fedora"; base = fedoraBase; };
+            arch   = mkImage { name = "knot-arch";   base = archBase;   };
+          };
         });
     };
 }
