@@ -94,5 +94,26 @@
             arch   = mkImage { name = "knot-arch";   base = archBase;   };
           };
         });
+
+      apps = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          mkTestApp = distro:
+            let
+              script = pkgs.writeShellScript "knot-test-${distro}" ''
+                set -euo pipefail
+                echo "==> Building knot-${distro} image..."
+                out=$(${pkgs.lib.getExe' pkgs.nix "nix"} --extra-experimental-features "nix-command flakes" build ".#images.${distro}" --no-link --print-out-paths)
+                echo "==> Loading into Docker..."
+                ${pkgs.lib.getExe pkgs.docker} load < "$out"
+                echo "==> Running knot-${distro} (exit or Ctrl-D to quit)..."
+                exec ${pkgs.lib.getExe pkgs.docker} run --rm -it "knot-${distro}:latest" "$@"
+              '';
+            in { type = "app"; program = "${script}"; };
+        in {
+          test-ubuntu = mkTestApp "ubuntu";
+          test-fedora = mkTestApp "fedora";
+          test-arch   = mkTestApp "arch";
+        });
     };
 }
