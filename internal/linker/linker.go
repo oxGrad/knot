@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/oxgrad/knot/internal/config"
 	"github.com/oxgrad/knot/internal/resolver"
@@ -96,8 +97,9 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 
 		source := resolver.ExpandPath(pkg.Source, l.HomeDir)
 		target := resolver.ExpandPath(pkg.Target, l.HomeDir)
+		perFile := strings.HasSuffix(pkg.Target, "/")
 
-		pkgActions, err := l.planPackage(name, source, target)
+		pkgActions, err := l.planPackage(name, source, target, perFile, pkg.Ignore)
 		if err != nil {
 			return nil, fmt.Errorf("planning package %q: %w", name, err)
 		}
@@ -107,9 +109,11 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 	return actions, nil
 }
 
-// planPackage computes the single link action for a package: symlinking the
-// source directory itself to the target path.
-func (l *Linker) planPackage(name, source, target string) ([]LinkAction, error) {
+// planPackage computes link action(s) for a package.
+// When perFile is true (target ends with "/"), each entry in source is linked
+// individually into the target directory. Otherwise a single directory-level
+// symlink is planned at target.
+func (l *Linker) planPackage(name, source, target string, perFile bool, ignore []string) ([]LinkAction, error) {
 	info, err := os.Stat(source)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -127,6 +131,10 @@ func (l *Linker) planPackage(name, source, target string) ([]LinkAction, error) 
 		return nil, fmt.Errorf("source %q is not a directory", source)
 	}
 
+	if perFile {
+		return l.planPerFile(name, source, target, ignore)
+	}
+
 	op, reason := l.classifyTarget(source, target)
 	return []LinkAction{{
 		Package: name,
@@ -135,6 +143,48 @@ func (l *Linker) planPackage(name, source, target string) ([]LinkAction, error) 
 		Op:      op,
 		Reason:  reason,
 	}}, nil
+}
+
+// planPerFile creates individual link actions for each entry in source, linking
+// them into target. Entries matching ignore patterns receive OpSkip actions.
+func (l *Linker) planPerFile(name, source, target string, ignore []string) ([]LinkAction, error) {
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return nil, fmt.Errorf("reading source %q: %w", source, err)
+	}
+
+	var actions []LinkAction
+	for _, entry := range entries {
+		filename := entry.Name()
+		fileSrc := filepath.Join(source, filename)
+		fileTgt := filepath.Join(target, filename)
+
+		shouldIgnore, err := resolver.ShouldIgnore(filename, ignore)
+		if err != nil {
+			return nil, fmt.Errorf("checking ignore for %q: %w", filename, err)
+		}
+		if shouldIgnore {
+			actions = append(actions, LinkAction{
+				Package: name,
+				Source:  fileSrc,
+				Target:  fileTgt,
+				Op:      OpSkip,
+				Reason:  "ignored by pattern",
+			})
+			continue
+		}
+
+		op, reason := l.classifyTarget(fileSrc, fileTgt)
+		actions = append(actions, LinkAction{
+			Package: name,
+			Source:  fileSrc,
+			Target:  fileTgt,
+			Op:      op,
+			Reason:  reason,
+		})
+	}
+
+	return actions, nil
 }
 
 // classifyTarget determines the OpType for a given (source, target) pair by inspecting
