@@ -1,8 +1,0 @@
-{
-  "yaml.schemas": {
-    "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json": "**/Knotfile"
-  },
-  "yaml.validate": true,
-  "yaml.completion": true,
-  "yaml.hover": true
-}

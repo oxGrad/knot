@@ -7,7 +7,7 @@
 [![Release](https://github.com/oxGrad/knot/actions/workflows/release.yml/badge.svg)](https://github.com/oxGrad/knot/actions/workflows/release.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Knot** is a CLI tool for managing your dotfiles. Like GNU Stow, it relies on symlinks to keep your configuration files centralized in a single repository. Unlike Stow, Knot is **fully configurable** — you explicitly define where files go, ignore specific files, and apply OS-specific rules without being forced into a rigid directory structure.
+Knot is a CLI tool for managing dotfiles via symlinks. Like GNU Stow, it centralizes your configuration files in a single repository. Unlike Stow, Knot is **fully configurable** — you explicitly define where files go, ignore specific files, and apply OS-specific rules without a rigid directory structure.
 
 ## ✨ Features
 
@@ -28,7 +28,7 @@
 brew install oxGrad/tap/knot
 ```
 
-This installs a pre-built binary for macOS (Intel + Apple Silicon) and Linux via the
+Installs a pre-built binary for macOS (Intel + Apple Silicon) and Linux via the
 [oxGrad/homebrew-tap](https://github.com/oxGrad/homebrew-tap) tap.
 
 ### Download a release binary
@@ -50,7 +50,8 @@ go install github.com/oxgrad/knot@latest
 
 ## ⚙️ Configuration (`Knotfile`)
 
-Create a file named exactly `Knotfile` (no extension) at the root of your dotfiles repository. Knot searches upward from the current directory to find it automatically.
+Create a file named exactly `Knotfile` (no extension) at the root of your dotfiles repository.
+Knot searches upward from the current directory to find it automatically.
 
 ```yaml
 packages:
@@ -62,9 +63,8 @@ packages:
       - "README.md"
       - ".DS_Store"
 
-  # Map files directly to the home directory
+  # Map zsh files directly into the home directory
   zsh:
-    target: ~/
     source: ./zsh
     tags: [home]
 
@@ -131,7 +131,7 @@ Global flags available on every command:
 
 ### `knot tie`
 
-Creates symlinks for the specified packages. Skips files that are already correctly linked.
+Creates symlinks for the specified packages. Skips packages that are already correctly linked.
 Warns on conflicts (target exists but is not the expected symlink) without overwriting.
 
 ```bash
@@ -155,18 +155,18 @@ knot untie --tag home    # untie all packages tagged "home"
 Shows the current state of every managed symlink:
 
 ```
-[OK]       ~/.config/nvim/init.lua
+[OK]       ~/.config/nvim
 [MISSING]  ~/.zshrc
-[CONFLICT] ~/.config/nvim/lazy-lock.json: target exists and is not a symlink
+[CONFLICT] ~/.config/karabiner: target exists and is not a symlink
 ```
 
 ### `knot plan`
 
-Dry-run that shows exactly what `tie` would do, with a summary line:
+Dry-run that shows exactly what `tie` would do:
 
 ```
-  + ~/.config/nvim/init.lua -> /dotfiles/nvim/init.lua
-  = ~/.config/nvim/options.lua (already linked)
+  + ~/.config/nvim -> /dotfiles/nvim
+  = ~/.zshrc (already linked)
 
 Plan: 1 to create, 0 to remove, 1 already linked, 0 conflicts
 ```
@@ -208,39 +208,88 @@ Key bindings:
 
 ## 🖥️ Editor Integration
 
-### Neovim
+Knot ships a [JSON Schema](schema/knotfile.schema.json) for the Knotfile format, enabling inline
+validation, hover documentation, and auto-completions in any editor that supports
+[yaml-language-server](https://github.com/redhat-developer/yaml-language-server).
 
-A full Neovim plugin lives in [`editors/neovim/`](editors/neovim/). It provides filetype detection,
-syntax highlighting, Treesitter YAML override, 🪢 devicon, and automatic `yaml-language-server`
-schema configuration. See [`editors/neovim/README.md`](editors/neovim/README.md) for installation
-instructions (lazy.nvim, packer.nvim, and manual).
+**Schema URL:**
+```
+https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
+```
 
-### YAML Language Server (VS Code and others)
+### Inline modeline (any editor)
 
-Add the Knotfile schema to your editor's YAML LS settings:
+Add this comment as the **first line** of any `Knotfile`. yaml-language-server picks it up
+automatically regardless of which editor you use — no editor configuration required.
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/.config/nvim
+```
+
+### VS Code
+
+Copy into your workspace `.vscode/settings.json`. Requires the
+[YAML extension by Red Hat](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml).
 
 ```json
 {
   "yaml.schemas": {
-    "https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json": "**/Knotfile"
+    "https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json": "**/Knotfile"
+  },
+  "yaml.validate": true,
+  "yaml.completion": true,
+  "yaml.hover": true
+}
+```
+
+### nvim-lspconfig
+
+Add the schema to your `yamlls` setup:
+
+```lua
+require("lspconfig").yamlls.setup({
+  settings = {
+    yaml = {
+      schemas = {
+        ["https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json"] = "**/Knotfile",
+      },
+    },
+  },
+})
+```
+
+### Global yamlls config (Helix, Zed, and others)
+
+Add the schema to whichever config file your editor reads for yaml-language-server:
+
+```json
+{
+  "schemas": {
+    "https://raw.githubusercontent.com/oxGrad/knot/main/schema/knotfile.schema.json": ["**/Knotfile", "Knotfile"]
   }
 }
 ```
 
-Or use an inline modeline as the first line of any `Knotfile`:
+### Neovim plugin
 
-```yaml
-# yaml-language-server: $schema=https://raw.githubusercontent.com/oxgrad/knot/main/schema/knotfile.schema.json
-packages:
-  ...
-```
+A full Neovim plugin lives in [`editors/neovim/`](editors/neovim/). It provides:
 
-See [`editors/yaml-language-server/README.md`](editors/yaml-language-server/README.md) for all
-integration methods.
+- Filetype detection for files named `Knotfile`
+- YAML syntax highlighting with Knotfile-specific keyword groups
+- Treesitter YAML parser override (Neovim 0.9+)
+- 🪢 devicon registration for nvim-web-devicons
+- Automatic yaml-language-server schema configuration at runtime (no manual lspconfig setup needed)
+
+See [`editors/neovim/README.md`](editors/neovim/README.md) for installation instructions
+(lazy.nvim, packer.nvim, and manual).
 
 ## 📦 Releasing a new version
 
-Releases are fully automated via [GoReleaser](https://goreleaser.com). Push a semver tag to `main`:
+Releases are automated via [GoReleaser](https://goreleaser.com). Push a semver tag to `main`:
 
 ```bash
 git tag v1.2.3
