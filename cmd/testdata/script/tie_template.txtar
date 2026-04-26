@@ -1,0 +1,38 @@
+# knot tie renders .tmpl files as real files in per-file mode.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/ghostty/config.tmpl --
+font-family = JetBrains Mono
+font-size = {{ if eq .os "linux" }}9{{ else }}12{{ end }}
+-- dotfiles/ghostty/other.conf --
+plain file
+-- dotfiles/Knotfile --
+packages:
+  ghostty:
+    source: ./ghostty
+    target: ~/config/ghostty/
+
+exec knot tie ghostty
+stdout 'rendered'
+
+# The rendered file must exist as a regular file.
+exists $HOME/config/ghostty/config
+
+# The .tmpl source must NOT appear at the target.
+! exists $HOME/config/ghostty/config.tmpl
+
+# Plain files are still symlinked normally.
+exists $HOME/config/ghostty/other.conf
+
+# Status shows 2 ok (rendered + symlink).
+exec knot status
+stdout '2 ok, 0 missing'
+
+# Running tie again is idempotent (no re-render output).
+exec knot tie ghostty
+! stdout 'rendered'
+
+exec knot untie ghostty
+stdout 'removed'
+
+! exists $HOME/config/ghostty/config

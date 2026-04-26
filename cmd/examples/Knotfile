@@ -43,6 +43,18 @@ packages:
     condition:
       os: linux
 
+  # ghostty terminal — per-file mode with OS-specific config via template
+  # Files ending in .tmpl are rendered with Go text/template and written as real
+  # files (not symlinks). The .tmpl suffix is stripped in the target name:
+  #   ghostty/config.tmpl  →  ~/.config/ghostty/config
+  # Available template variables: .os  .arch  .hostname  .username  .home  .env
+  # Example ghostty/config.tmpl:
+  #   font-family = JetBrains Mono
+  #   {{ if eq .os "darwin" }}font-size = 12{{ else }}font-size = 9{{ end }}
+  ghostty:
+    source: ./ghostty
+    target: ~/.config/ghostty/
+
   # untagged — still usable by name: knot tie secrets
   secrets:
     target: ~/.ssh

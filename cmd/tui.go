@@ -75,6 +75,12 @@ func computeStatus(actions []linker.LinkAction) pkgStatus {
 			skipped++
 		case linker.OpSourceNotFound:
 			sourceNotFound++
+		case linker.OpRenderExists:
+			tied++
+		case linker.OpRender:
+			untied++
+		case linker.OpRemoveRendered:
+			tied++ // file exists on disk; counts as tied until untied
 		}
 	}
 	nonSkip := tied + untied + conflict
