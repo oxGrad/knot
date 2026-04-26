@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -28,6 +29,19 @@ var (
 	styleCyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+
+	// header ASCII art gradient: bright-cyan (top) → dark-blue (bottom)
+	styleArt = [6]lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("87")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("69")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("57")).Bold(true),
+	}
+	styleMascotNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleMascotConflict = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	styleMascotMissing  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 )
 
 // ── pkg status ────────────────────────────────────────────────────────────────
@@ -96,6 +110,48 @@ func computeStatus(actions []linker.LinkAction) pkgStatus {
 	return statusPartial
 }
 
+// ── header art & mascot ───────────────────────────────────────────────────────
+
+// knotArt is "KNOT" in 6-row block-letter style; each row is 37 visual columns wide.
+var knotArt = [6]string{
+	`██╗  ██╗███╗   ██╗ ██████╗ ████████╗`,
+	`██║ ██╔╝████╗  ██║██╔═══██╗╚══██╔══╝`,
+	`█████╔╝ ██╔██╗ ██║██║   ██║   ██║   `,
+	`██╔═██╗ ██║╚██╗██║██║   ██║   ██║   `,
+	`██║  ██╗██║ ╚████║╚██████╔╝   ██║   `,
+	`╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝   ╚═╝   `,
+}
+
+type mascotState int
+
+const (
+	mascotNormal   mascotState = iota // idle
+	mascotConflict                    // package conflict detected
+	mascotMissing                     // no packages / no git repo
+)
+
+// mascotFrames[state][frame][line] — each line is exactly 7 visual columns.
+var mascotFrames = [3][3][6]string{
+	// mascotNormal: green, slow blink
+	{
+		{` ╭──╮  `, ` │oo│  `, ` ╰∞∞╯  `, `  ||   `, ` /||\  `, ` \__/  `},
+		{` ╭──╮  `, ` │--│  `, ` ╰∞∞╯  `, `  ||   `, ` /||\  `, ` \__/  `},
+		{` ╭──╮  `, ` │oo│  `, ` ╰∞∞╯  `, `  ||   `, `\/||\/  `, ` \__/  `},
+	},
+	// mascotConflict: red, frantic
+	{
+		{` ╭──╮  `, ` │!!│  `, ` ╰!!╯  `, `  ||   `, ` /||\  `, ` /  \  `},
+		{` ╭──╮  `, ` │**│  `, ` ╰XX╯  `, `  ||   `, ` \||/  `, ` /  \  `},
+		{` ╭──╮  `, ` │!!│  `, ` ╰~~╯  `, `  ||   `, `\/||\ `, ` \  \  `},
+	},
+	// mascotMissing: yellow, looking side-to-side
+	{
+		{` ╭──╮  `, ` │??│  `, ` ╰..╯  `, `   |   `, `  / \  `, `   |   `},
+		{` ╭──╮  `, ` │? │  `, ` ╰..╯  `, `   |   `, ` / \   `, `   |   `},
+		{` ╭──╮  `, ` │ ?│  `, ` ╰..╯  `, `   |   `, `   / \ `, `   |   `},
+	},
+}
+
 // ── model types ───────────────────────────────────────────────────────────────
 
 type pkgRow struct {
@@ -148,9 +204,12 @@ type model struct {
 	statusMsg    string // inline error for editor failure etc.
 
 	width, height int
+	headerFrame   int // incremented every 600ms for mascot animation
 }
 
 // ── message types ─────────────────────────────────────────────────────────────
+
+type headerTickMsg struct{}
 
 type gitInfoMsg struct {
 	branch string
@@ -363,11 +422,8 @@ func (m *model) toggleTag(tr *tagRow) {
 }
 
 func (m *model) listHeaderLines() int {
-	// title + git-info (if available) + divider = 2 or 3
-	if m.gitBranch != "" {
-		return 3
-	}
-	return 2
+	// brand box (11 lines) + tab header (1 line) = 12
+	return 12
 }
 
 func (m *model) visibleHeight() int {
@@ -443,6 +499,75 @@ func (m *model) adjustTagOffset() {
 	}
 }
 
+func (m model) renderBrandHeader() string {
+	state := m.currentMascotState()
+	var frame int
+	if state == mascotNormal {
+		frame = (m.headerFrame / 2) % 3
+	} else {
+		frame = m.headerFrame % 3
+	}
+	mascotLines := mascotFrames[state][frame]
+
+	var mascotStyle lipgloss.Style
+	switch state {
+	case mascotConflict:
+		mascotStyle = styleMascotConflict
+	case mascotMissing:
+		mascotStyle = styleMascotMissing
+	default:
+		mascotStyle = styleMascotNormal
+	}
+
+	const artW = 37   // visual width of each knotArt row
+	const mascotW = 7 // visual width of each mascot row
+	const leftPad = 2
+	const gap = 4
+	const contentW = leftPad + artW + gap + mascotW // 50
+
+	innerW := max(m.width, 62) - 2
+	hLine := strings.Repeat("─", innerW)
+	rightPad := strings.Repeat(" ", max(innerW-contentW, 0))
+
+	var b strings.Builder
+
+	// top border
+	b.WriteString("╭" + hLine + "╮\n")
+	// empty line
+	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
+	// 6 lines of KNOT art + knotman side-by-side
+	for i := 0; i < 6; i++ {
+		art := styleArt[i].Render(knotArt[i])
+		mascot := mascotStyle.Render(mascotLines[i])
+		b.WriteString("│  " + art + strings.Repeat(" ", gap) + mascot + rightPad + "│\n")
+	}
+	// empty line
+	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
+	// subtitle / git info
+	subtitle := styleDim.Render("dotfiles manager")
+	if m.gitBranch != "" {
+		commitInfo := m.gitSHA
+		if m.gitCommitMsg != "" {
+			// reserve space for "dotfiles manager · on <branch> · <sha> "
+			overhead := len("dotfiles manager · on  · ") + len(m.gitBranch) + len(m.gitSHA) + 1
+			maxMsgLen := max(innerW-leftPad-overhead, 10)
+			msg := []rune(m.gitCommitMsg)
+			if len(msg) > maxMsgLen {
+				msg = append(msg[:maxMsgLen-1], '…')
+			}
+			commitInfo = m.gitSHA + " " + string(msg)
+		}
+		subtitle += styleDim.Render(" · on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo)
+	}
+	subtitleVisW := lipgloss.Width(subtitle)
+	subRightPad := strings.Repeat(" ", max(innerW-leftPad-subtitleVisW, 0))
+	b.WriteString("│  " + subtitle + subRightPad + "│\n")
+	// bottom border
+	b.WriteString("╰" + hLine + "╯\n")
+
+	return b.String()
+}
+
 func (m model) renderTabHeader() string {
 	var pkgTab, tagTab string
 	if m.activeTab == tabPackages {
@@ -455,11 +580,36 @@ func (m model) renderTabHeader() string {
 	return " " + pkgTab + styleDim.Render(" │ ") + tagTab
 }
 
+func (m model) hasConflicts() bool {
+	for _, r := range m.rows {
+		if r.status == statusConflict {
+			return true
+		}
+	}
+	return false
+}
+
+func (m model) currentMascotState() mascotState {
+	if m.hasConflicts() {
+		return mascotConflict
+	}
+	if len(m.rows) == 0 || m.gitBranch == "" {
+		return mascotMissing
+	}
+	return mascotNormal
+}
+
 func dotfilesDir(cfgPath string) string {
 	return filepath.Dir(cfgPath)
 }
 
 // ── tea.Cmds ─────────────────────────────────────────────────────────────────
+
+func headerTickCmd() tea.Cmd {
+	return tea.Tick(600*time.Millisecond, func(time.Time) tea.Msg {
+		return headerTickMsg{}
+	})
+}
 
 func fetchGitInfoCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
@@ -582,7 +732,10 @@ func editorCmd(cfgPath string) tea.Cmd {
 // ── bubbletea interface ───────────────────────────────────────────────────────
 
 func (m model) Init() tea.Cmd {
-	return fetchGitInfoCmd(dotfilesDir(m.cfgPath))
+	return tea.Batch(
+		fetchGitInfoCmd(dotfilesDir(m.cfgPath)),
+		headerTickCmd(),
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -594,6 +747,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustOffset()
 		m.adjustBranchOffset()
 		return m, nil
+
+	case headerTickMsg:
+		m.headerFrame++
+		return m, headerTickCmd()
 
 	case gitInfoMsg:
 		if msg.err == nil {
@@ -890,20 +1047,7 @@ func (m model) viewList() string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(styleBold.Render("knot") + styleDim.Render(" — interactive mode") + "\n")
-	if m.gitBranch != "" {
-		commitInfo := m.gitSHA
-		if m.gitCommitMsg != "" {
-			maxMsgLen := max(m.width-len(m.gitBranch)-len(m.gitSHA)-10, 20)
-			msg := m.gitCommitMsg
-			if len(msg) > maxMsgLen {
-				msg = msg[:maxMsgLen-1] + "…"
-			}
-			commitInfo = m.gitSHA + " " + msg
-		}
-		b.WriteString(styleDim.Render("on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo) + "\n")
-	}
-	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	b.WriteString(m.renderBrandHeader())
 	b.WriteString(m.renderTabHeader() + "\n")
 
 	// Package list
@@ -961,21 +1105,8 @@ func (m model) viewList() string {
 func (m model) viewTags() string {
 	var b strings.Builder
 
-	// Header (same as viewList)
-	b.WriteString(styleBold.Render("knot") + styleDim.Render(" — interactive mode") + "\n")
-	if m.gitBranch != "" {
-		commitInfo := m.gitSHA
-		if m.gitCommitMsg != "" {
-			maxMsgLen := max(m.width-len(m.gitBranch)-len(m.gitSHA)-10, 20)
-			msg := m.gitCommitMsg
-			if len(msg) > maxMsgLen {
-				msg = msg[:maxMsgLen-1] + "…"
-			}
-			commitInfo = m.gitSHA + " " + msg
-		}
-		b.WriteString(styleDim.Render("on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo) + "\n")
-	}
-	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	// Header
+	b.WriteString(m.renderBrandHeader())
 	b.WriteString(m.renderTabHeader() + "\n")
 	b.WriteString("\n")
 
