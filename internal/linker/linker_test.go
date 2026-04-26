@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/oxgrad/knot/internal/config"
@@ -31,6 +32,17 @@ func newTestLinker(dryRun bool) *Linker {
 		DryRun:  dryRun,
 		HomeDir: "/home/testuser",
 		GOOS:    runtime.GOOS,
+		GoArch:  runtime.GOARCH,
+		Writer:  &bytes.Buffer{},
+	}
+}
+
+func newTemplateLinker(dryRun bool) *Linker {
+	return &Linker{
+		DryRun:  dryRun,
+		HomeDir: "/home/testuser",
+		GOOS:    "linux",
+		GoArch:  "amd64",
 		Writer:  &bytes.Buffer{},
 	}
 }
@@ -1036,4 +1048,328 @@ func filterOp(actions []LinkAction, op OpType) []LinkAction {
 		}
 	}
 	return result
+}
+
+// --- Template tests ---
+
+func TestPlan_PerFileMode_TemplateFile(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `font-size = {{ if eq .os "linux" }}9{{ else }}12{{ end }}`,
+		"other.conf":  "plain file",
+	})
+	targetDir := t.TempDir() + "/"
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	renders := filterOp(actions, OpRender)
+	if len(renders) != 1 {
+		t.Fatalf("expected 1 OpRender, got %d", len(renders))
+	}
+	if !strings.HasSuffix(renders[0].Target, "/config") {
+		t.Errorf("render target = %q, want suffix /config (no .tmpl)", renders[0].Target)
+	}
+	if strings.HasSuffix(renders[0].Target, ".tmpl") {
+		t.Errorf("render target must not have .tmpl suffix, got %q", renders[0].Target)
+	}
+
+	creates := filterOp(actions, OpCreate)
+	if len(creates) != 1 {
+		t.Fatalf("expected 1 OpCreate for plain file, got %d", len(creates))
+	}
+	if !strings.HasSuffix(creates[0].Target, "/other.conf") {
+		t.Errorf("create target = %q, want suffix /other.conf", creates[0].Target)
+	}
+}
+
+func TestPlan_PerFileMode_TemplateAlreadyRendered(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `font-size = 9`,
+	})
+	targetDir := t.TempDir()
+
+	// Pre-write the exact rendered content.
+	targetFile := filepath.Join(targetDir, "config")
+	if err := os.WriteFile(targetFile, []byte("font-size = 9"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	renderExists := filterOp(actions, OpRenderExists)
+	if len(renderExists) != 1 {
+		t.Errorf("expected 1 OpRenderExists, got %d (actions: %+v)", len(renderExists), actions)
+	}
+}
+
+func TestPlan_PerFileMode_TemplateContentChanged(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `font-size = 9`,
+	})
+	targetDir := t.TempDir()
+
+	// Pre-write stale content.
+	targetFile := filepath.Join(targetDir, "config")
+	if err := os.WriteFile(targetFile, []byte("font-size = 12"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	renders := filterOp(actions, OpRender)
+	if len(renders) != 1 {
+		t.Errorf("expected 1 OpRender for changed content, got %d", len(renders))
+	}
+}
+
+func TestApply_RendersTemplate(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `font-size = {{ if eq .os "linux" }}9{{ else }}12{{ end }}`,
+	})
+	targetDir := t.TempDir()
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if err := l.Apply(actions); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+
+	targetFile := filepath.Join(targetDir, "config")
+	info, err := os.Lstat(targetFile)
+	if err != nil {
+		t.Fatalf("target file not found: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Error("target must be a regular file, not a symlink")
+	}
+
+	content, err := os.ReadFile(targetFile)
+	if err != nil {
+		t.Fatalf("reading target: %v", err)
+	}
+	if string(content) != "font-size = 9" {
+		t.Errorf("rendered content = %q, want %q", string(content), "font-size = 9")
+	}
+
+	// Permissions should be 0644.
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("file permissions = %o, want 0644", info.Mode().Perm())
+	}
+}
+
+func TestApply_RenderDryRun(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `value = {{ .os }}`,
+	})
+	targetDir := t.TempDir()
+
+	buf := &bytes.Buffer{}
+	l := newTemplateLinker(true)
+	l.Writer = buf
+
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if err := l.Apply(actions); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+
+	// Target file must not be created in dry-run.
+	targetFile := filepath.Join(targetDir, "config")
+	if _, err := os.Stat(targetFile); err == nil {
+		t.Error("target file must not exist after dry-run apply")
+	}
+	if !strings.Contains(buf.String(), "[dry-run] render") {
+		t.Errorf("expected dry-run output, got %q", buf.String())
+	}
+}
+
+func TestPlanUntie_RenderedFile(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `value = {{ .os }}`,
+	})
+	targetDir := t.TempDir()
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	// First: tie (render the template).
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+	if err := l.Apply(actions); err != nil {
+		t.Fatalf("Apply() error: %v", err)
+	}
+
+	// Now plan the untie.
+	untieActions, err := l.PlanUntie(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("PlanUntie() error: %v", err)
+	}
+
+	removes := filterOp(untieActions, OpRemoveRendered)
+	if len(removes) != 1 {
+		t.Errorf("expected 1 OpRemoveRendered, got %d (actions: %+v)", len(removes), untieActions)
+	}
+}
+
+func TestApply_RemoveRendered(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `value = {{ .os }}`,
+	})
+	targetDir := t.TempDir()
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	// Tie.
+	actions, _ := l.Plan(cfg, []string{"ghostty"})
+	_ = l.Apply(actions)
+
+	targetFile := filepath.Join(targetDir, "config")
+	if _, err := os.Stat(targetFile); err != nil {
+		t.Fatalf("rendered file should exist after tie: %v", err)
+	}
+
+	// Untie.
+	untieActions, err := l.PlanUntie(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("PlanUntie() error: %v", err)
+	}
+	if err := l.Apply(untieActions); err != nil {
+		t.Fatalf("Apply(untie) error: %v", err)
+	}
+
+	if _, err := os.Stat(targetFile); err == nil {
+		t.Error("rendered file should be removed after untie")
+	}
+}
+
+func TestApply_RenderIdempotent(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `value = {{ .os }}`,
+	})
+	targetDir := t.TempDir()
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: targetDir + "/"},
+		},
+	}
+
+	// First apply.
+	actions, _ := l.Plan(cfg, []string{"ghostty"})
+	_ = l.Apply(actions)
+
+	// Second plan: should show OpRenderExists.
+	actions2, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("second Plan() error: %v", err)
+	}
+	renderExists := filterOp(actions2, OpRenderExists)
+	if len(renderExists) != 1 {
+		t.Errorf("expected 1 OpRenderExists on second plan, got %d (actions: %+v)", len(renderExists), actions2)
+	}
+}
+
+func TestPlan_DirectoryMode_IgnoresTemplates(t *testing.T) {
+	source := makePackageTree(t, map[string]string{
+		"config.tmpl": `value = {{ .os }}`,
+		"other.conf":  "plain",
+	})
+	// No trailing slash → directory mode.
+	target := filepath.Join(t.TempDir(), "ghostty-dir")
+
+	l := newTemplateLinker(false)
+	cfg := &config.Config{
+		Packages: map[string]config.Package{
+			"ghostty": {Source: source, Target: target},
+		},
+	}
+
+	actions, err := l.Plan(cfg, []string{"ghostty"})
+	if err != nil {
+		t.Fatalf("Plan() error: %v", err)
+	}
+
+	// Directory mode: single OpCreate for the whole directory, no OpRender.
+	creates := filterOp(actions, OpCreate)
+	if len(creates) != 1 {
+		t.Errorf("expected 1 OpCreate (directory symlink), got %d", len(creates))
+	}
+	renders := filterOp(actions, OpRender)
+	if len(renders) != 0 {
+		t.Errorf("directory mode must not produce OpRender, got %d", len(renders))
+	}
+}
+
+func TestOpType_String_NewValues(t *testing.T) {
+	cases := []struct {
+		op   OpType
+		want string
+	}{
+		{OpRender, "render"},
+		{OpRenderExists, "render-exists"},
+		{OpRemoveRendered, "remove-rendered"},
+	}
+	for _, tc := range cases {
+		if got := tc.op.String(); got != tc.want {
+			t.Errorf("OpType(%d).String() = %q, want %q", tc.op, got, tc.want)
+		}
+	}
 }

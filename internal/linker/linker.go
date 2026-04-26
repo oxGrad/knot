@@ -1,6 +1,7 @@
 package linker
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/oxgrad/knot/internal/config"
 	"github.com/oxgrad/knot/internal/resolver"
+	tmplpkg "github.com/oxgrad/knot/internal/template"
 )
 
 // OpType describes the kind of action to take for a symlink.
@@ -24,6 +26,9 @@ const (
 	OpRemove                        // symlink will be removed (untie)
 	OpSkip                          // ignored by pattern or condition
 	OpSourceNotFound                // source directory does not exist on this machine
+	OpRender                        // .tmpl file will be rendered to a real file
+	OpRenderExists                  // rendered output matches target content — no-op
+	OpRemoveRendered                // rendered file will be deleted (untie)
 )
 
 func (o OpType) String() string {
@@ -42,6 +47,12 @@ func (o OpType) String() string {
 		return "skip"
 	case OpSourceNotFound:
 		return "source-not-found"
+	case OpRender:
+		return "render"
+	case OpRenderExists:
+		return "render-exists"
+	case OpRemoveRendered:
+		return "remove-rendered"
 	default:
 		return "unknown"
 	}
@@ -49,11 +60,12 @@ func (o OpType) String() string {
 
 // LinkAction describes a single planned filesystem operation.
 type LinkAction struct {
-	Package string
-	Source  string // absolute path to source file
-	Target  string // absolute path where symlink will be created
-	Op      OpType
-	Reason  string
+	Package  string
+	Source   string // absolute path to source file
+	Target   string // absolute path where symlink or rendered file will be created
+	Op       OpType
+	Reason   string
+	Rendered []byte // non-nil for OpRender; holds pre-rendered template content
 }
 
 // Linker is the core engine for managing symlinks.
@@ -61,6 +73,7 @@ type Linker struct {
 	DryRun  bool
 	HomeDir string
 	GOOS    string
+	GoArch  string
 	Writer  io.Writer
 }
 
@@ -71,6 +84,7 @@ func New(dryRun bool) *Linker {
 		DryRun:  dryRun,
 		HomeDir: home,
 		GOOS:    runtime.GOOS,
+		GoArch:  runtime.GOARCH,
 		Writer:  os.Stdout,
 	}
 }
@@ -113,6 +127,7 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 // When perFile is true (target ends with "/"), each entry in source is linked
 // individually into the target directory. Otherwise a single directory-level
 // symlink is planned at target.
+// Template rendering (.tmpl files) only activates in per-file mode.
 func (l *Linker) planPackage(name, source, target string, perFile bool, ignore []string) ([]LinkAction, error) {
 	info, err := os.Stat(source)
 	if err != nil {
@@ -147,17 +162,23 @@ func (l *Linker) planPackage(name, source, target string, perFile bool, ignore [
 
 // planPerFile creates individual link actions for each entry in source, linking
 // them into target. Entries matching ignore patterns receive OpSkip actions.
+// Files with a .tmpl suffix are rendered to real files instead of being symlinked.
 func (l *Linker) planPerFile(name, source, target string, ignore []string) ([]LinkAction, error) {
 	entries, err := os.ReadDir(source)
 	if err != nil {
 		return nil, fmt.Errorf("reading source %q: %w", source, err)
 	}
 
-	var actions []LinkAction
+	var (
+		actions      []LinkAction
+		tmplData     tmplpkg.TemplateData
+		tmplDataErr  error
+		tmplDataOnce bool
+	)
+
 	for _, entry := range entries {
 		filename := entry.Name()
 		fileSrc := filepath.Join(source, filename)
-		fileTgt := filepath.Join(target, filename)
 
 		shouldIgnore, err := resolver.ShouldIgnore(filename, ignore)
 		if err != nil {
@@ -167,13 +188,32 @@ func (l *Linker) planPerFile(name, source, target string, ignore []string) ([]Li
 			actions = append(actions, LinkAction{
 				Package: name,
 				Source:  fileSrc,
-				Target:  fileTgt,
+				Target:  filepath.Join(target, filename),
 				Op:      OpSkip,
 				Reason:  "ignored by pattern",
 			})
 			continue
 		}
 
+		if strings.HasSuffix(filename, ".tmpl") {
+			// Build template data once, lazily, on the first .tmpl file.
+			if !tmplDataOnce {
+				tmplData, tmplDataErr = tmplpkg.BuildTemplateData(l.GOOS, l.GoArch, l.HomeDir)
+				tmplDataOnce = true
+			}
+			if tmplDataErr != nil {
+				return nil, fmt.Errorf("building template data: %w", tmplDataErr)
+			}
+			fileTgt := filepath.Join(target, strings.TrimSuffix(filename, ".tmpl"))
+			action, err := l.planTemplateFile(name, fileSrc, fileTgt, tmplData)
+			if err != nil {
+				return nil, fmt.Errorf("planning template %q: %w", filename, err)
+			}
+			actions = append(actions, action)
+			continue
+		}
+
+		fileTgt := filepath.Join(target, filename)
 		op, reason := l.classifyTarget(fileSrc, fileTgt)
 		actions = append(actions, LinkAction{
 			Package: name,
@@ -185,6 +225,62 @@ func (l *Linker) planPerFile(name, source, target string, ignore []string) ([]Li
 	}
 
 	return actions, nil
+}
+
+// planTemplateFile computes the action for a single .tmpl source file.
+// It renders the template to compare against any existing target content.
+func (l *Linker) planTemplateFile(name, srcPath, targetPath string, data tmplpkg.TemplateData) (LinkAction, error) {
+	rendered, err := tmplpkg.RenderFile(srcPath, data)
+	if err != nil {
+		return LinkAction{
+			Package: name,
+			Source:  srcPath,
+			Target:  targetPath,
+			Op:      OpConflict,
+			Reason:  fmt.Sprintf("template render error: %v", err),
+		}, nil
+	}
+
+	existing, readErr := os.ReadFile(targetPath)
+	if readErr != nil {
+		if os.IsNotExist(readErr) {
+			return LinkAction{
+				Package:  name,
+				Source:   srcPath,
+				Target:   targetPath,
+				Op:       OpRender,
+				Reason:   "template file",
+				Rendered: rendered,
+			}, nil
+		}
+		// Target exists but is unreadable (e.g., permission error) — conflict.
+		return LinkAction{
+			Package: name,
+			Source:  srcPath,
+			Target:  targetPath,
+			Op:      OpConflict,
+			Reason:  fmt.Sprintf("reading target: %v", readErr),
+		}, nil
+	}
+
+	if bytes.Equal(existing, rendered) {
+		return LinkAction{
+			Package: name,
+			Source:  srcPath,
+			Target:  targetPath,
+			Op:      OpRenderExists,
+			Reason:  "already rendered",
+		}, nil
+	}
+
+	return LinkAction{
+		Package:  name,
+		Source:   srcPath,
+		Target:   targetPath,
+		Op:       OpRender,
+		Reason:   "template output changed",
+		Rendered: rendered,
+	}, nil
 }
 
 // classifyTarget determines the OpType for a given (source, target) pair by inspecting
@@ -234,6 +330,14 @@ func (l *Linker) PlanUntie(cfg *config.Config, packageNames []string) ([]LinkAct
 		case OpCreate:
 			actions[i].Op = OpSkip
 			actions[i].Reason = "not linked"
+		case OpRenderExists:
+			actions[i].Op = OpRemoveRendered
+			actions[i].Reason = "removing rendered file"
+			actions[i].Rendered = nil
+		case OpRender:
+			actions[i].Op = OpSkip
+			actions[i].Reason = "not rendered"
+			actions[i].Rendered = nil
 		}
 	}
 	return actions, nil
@@ -273,8 +377,42 @@ func (l *Linker) Apply(actions []LinkAction) error {
 			}
 			_, _ = fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
 
-		case OpExists:
-			// no-op, already correctly linked
+		case OpRender:
+			if l.DryRun {
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] render %s from %s\n", a.Target, a.Source)
+				continue
+			}
+			if err := os.MkdirAll(filepath.Dir(a.Target), 0o755); err != nil {
+				errs = append(errs, fmt.Errorf("mkdir %q: %w", filepath.Dir(a.Target), err))
+				continue
+			}
+			// If a symlink exists at the target path (e.g., leftover from directory mode),
+			// remove it before writing so os.WriteFile writes a real file, not through the link.
+			if info, err := os.Lstat(a.Target); err == nil && info.Mode()&os.ModeSymlink != 0 {
+				if err := os.Remove(a.Target); err != nil {
+					errs = append(errs, fmt.Errorf("removing stale symlink %q: %w", a.Target, err))
+					continue
+				}
+			}
+			if err := os.WriteFile(a.Target, a.Rendered, 0o644); err != nil {
+				errs = append(errs, fmt.Errorf("writing rendered file %q: %w", a.Target, err))
+				continue
+			}
+			_, _ = fmt.Fprintf(l.Writer, "rendered %s\n", a.Target)
+
+		case OpRemoveRendered:
+			if l.DryRun {
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] remove (rendered) %s\n", a.Target)
+				continue
+			}
+			if err := os.Remove(a.Target); err != nil {
+				errs = append(errs, fmt.Errorf("remove %q: %w", a.Target, err))
+				continue
+			}
+			_, _ = fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
+
+		case OpExists, OpRenderExists:
+			// no-op, already correctly linked or rendered
 
 		case OpConflict:
 			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
@@ -311,8 +449,12 @@ func (l *Linker) Status(cfg *config.Config) error {
 		switch a.Op {
 		case OpExists:
 			_, _ = fmt.Fprintf(l.Writer, "[OK]       %s\n", a.Target)
+		case OpRenderExists:
+			_, _ = fmt.Fprintf(l.Writer, "[OK]       %s (rendered)\n", a.Target)
 		case OpCreate:
 			_, _ = fmt.Fprintf(l.Writer, "[MISSING]  %s\n", a.Target)
+		case OpRender:
+			_, _ = fmt.Fprintf(l.Writer, "[MISSING]  %s (template not rendered)\n", a.Target)
 		case OpConflict:
 			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
 		case OpBroken:
@@ -325,7 +467,9 @@ func (l *Linker) Status(cfg *config.Config) error {
 	}
 
 	_, _ = fmt.Fprintf(l.Writer, "\n%d ok, %d missing, %d conflict, %d broken\n",
-		counts[OpExists], counts[OpCreate], counts[OpConflict], counts[OpBroken])
+		counts[OpExists]+counts[OpRenderExists],
+		counts[OpCreate]+counts[OpRender],
+		counts[OpConflict], counts[OpBroken])
 	return nil
 }
 
@@ -345,6 +489,12 @@ func (l *Linker) PrintPlan(actions []LinkAction) {
 			_, _ = fmt.Fprintf(l.Writer, "  ! %s (conflict: %s)\n", a.Target, a.Reason)
 		case OpBroken:
 			_, _ = fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
+		case OpRender:
+			_, _ = fmt.Fprintf(l.Writer, "  + %s (render from %s)\n", a.Target, a.Source)
+		case OpRenderExists:
+			_, _ = fmt.Fprintf(l.Writer, "  = %s (already rendered)\n", a.Target)
+		case OpRemoveRendered:
+			_, _ = fmt.Fprintf(l.Writer, "  - %s (rendered file)\n", a.Target)
 		case OpSkip:
 			// silent
 		case OpSourceNotFound:
@@ -353,5 +503,8 @@ func (l *Linker) PrintPlan(actions []LinkAction) {
 	}
 
 	_, _ = fmt.Fprintf(l.Writer, "\nPlan: %d to create, %d to remove, %d already linked, %d conflicts\n",
-		counts[OpCreate], counts[OpRemove], counts[OpExists], counts[OpConflict])
+		counts[OpCreate]+counts[OpRender],
+		counts[OpRemove]+counts[OpRemoveRendered],
+		counts[OpExists]+counts[OpRenderExists],
+		counts[OpConflict])
 }
