@@ -10,6 +10,8 @@ builds:
     binary: knot
     env:
       - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X github.com/oxgrad/knot/cmd.Version={{.Version}}
     goos:
       - linux
       - darwin
@@ -31,13 +33,17 @@ archives:
 checksum:
   name_template: checksums.txt
 
+release:
+  make_latest: true
+
 changelog:
   sort: asc
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
+      - "^docs[:(]"
+      - "^test[:(]"
+      - "^chore[:(]"
+      - "^Merge "
 
 brews:
   - name: knot
@@ -48,7 +54,3 @@ brews:
     homepage: "https://github.com/oxGrad/knot"
     description: "A lightweight, configurable dotfiles manager"
     license: MIT
-    install: |
-      bin.install "knot"
-    test: |
-      system "#{bin}/knot", "--help"

@@ -1,0 +1,24 @@
+services:
+  knot-ubuntu:
+    build:
+      context: .
+      no_cache: true
+      target: ubuntu
+    stdin_open: true
+    tty: true
+
+  knot-fedora:
+    build:
+      context: .
+      no_cache: true
+      target: fedora
+    stdin_open: true
+    tty: true
+
+  knot-arch:
+    build:
+      context: .
+      no_cache: true
+      target: arch
+    stdin_open: true
+    tty: true

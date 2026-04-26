@@ -1,0 +1,21 @@
+# knot validate exits 0 when the Knotfile is fully valid.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/zsh/.zshrc --
+# zsh config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/.config/nvim
+    ignore:
+      - '*.log'
+  zsh:
+    source: ./zsh
+    target: ~/
+
+exec knot validate
+stdout 'Validation passed'
+stdout '2 package'

@@ -1,0 +1,18 @@
+# knot untie removes previously created symlinks.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+exec knot tie nvim
+exists $HOME/nvim-config/.vimrc
+
+exec knot untie nvim
+stdout 'removed'
+
+! exists $HOME/nvim-config/.vimrc

@@ -1,0 +1,13 @@
+# knot validate exits 1 when source directories do not exist.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/.config/nvim
+
+! exec knot validate
+stdout 'does not exist'
+stdout 'Validation failed'
+stdout '1 error'

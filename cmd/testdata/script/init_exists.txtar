@@ -1,0 +1,8 @@
+# knot init fails when a Knotfile already exists.
+env KNOT_DIR=$WORK/dotfiles
+
+exec knot init
+stdout 'Created'
+
+! exec knot init
+stderr 'already exists'

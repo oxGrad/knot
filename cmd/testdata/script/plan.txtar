@@ -1,0 +1,23 @@
+# knot plan --all shows actions without touching the filesystem.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/zsh/.zshrc --
+# zsh config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+  zsh:
+    source: ./zsh
+    target: ~/zsh-config
+
+exec knot plan --all
+stdout '\+'
+stdout 'to create'
+
+# Filesystem must be unchanged — no symlinks created.
+! exists $HOME/nvim-config/.vimrc
+! exists $HOME/zsh-config/.zshrc

@@ -1,0 +1,21 @@
+# knot tie --all ties every package in the Knotfile.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/zsh/.zshrc --
+# zsh config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+  zsh:
+    source: ./zsh
+    target: ~/zsh-config
+
+exec knot tie --all
+stdout 'linked'
+
+exists $HOME/nvim-config/.vimrc
+exists $HOME/zsh-config/.zshrc

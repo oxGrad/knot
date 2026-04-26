@@ -1,0 +1,14 @@
+# knot status shows MISSING before any symlinks are created.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+exec knot status
+stdout '\[MISSING\]'
+stdout '0 ok, 1 missing'

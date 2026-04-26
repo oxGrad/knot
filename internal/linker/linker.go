@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/oxgrad/knot/internal/config"
 	"github.com/oxgrad/knot/internal/resolver"
@@ -16,12 +17,13 @@ import (
 type OpType int
 
 const (
-	OpCreate   OpType = iota // symlink will be created
-	OpExists                 // correct symlink already present — no-op
-	OpConflict               // target exists but is not the expected symlink
-	OpBroken                 // target is a symlink pointing nowhere
-	OpRemove                 // symlink will be removed (untie)
-	OpSkip                   // ignored by pattern or condition
+	OpCreate          OpType = iota // symlink will be created
+	OpExists                        // correct symlink already present — no-op
+	OpConflict                      // target exists but is not the expected symlink
+	OpBroken                        // target is a symlink pointing nowhere
+	OpRemove                        // symlink will be removed (untie)
+	OpSkip                          // ignored by pattern or condition
+	OpSourceNotFound                // source directory does not exist on this machine
 )
 
 func (o OpType) String() string {
@@ -38,6 +40,8 @@ func (o OpType) String() string {
 		return "remove"
 	case OpSkip:
 		return "skip"
+	case OpSourceNotFound:
+		return "source-not-found"
 	default:
 		return "unknown"
 	}
@@ -93,8 +97,9 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 
 		source := resolver.ExpandPath(pkg.Source, l.HomeDir)
 		target := resolver.ExpandPath(pkg.Target, l.HomeDir)
+		perFile := strings.HasSuffix(pkg.Target, "/")
 
-		pkgActions, err := l.planPackage(name, source, target, pkg.Ignore)
+		pkgActions, err := l.planPackage(name, source, target, perFile, pkg.Ignore)
 		if err != nil {
 			return nil, fmt.Errorf("planning package %q: %w", name, err)
 		}
@@ -104,58 +109,82 @@ func (l *Linker) Plan(cfg *config.Config, packageNames []string) ([]LinkAction, 
 	return actions, nil
 }
 
-// planPackage walks the source directory and computes link actions for each file.
-func (l *Linker) planPackage(name, source, target string, ignorePatterns []string) ([]LinkAction, error) {
+// planPackage computes link action(s) for a package.
+// When perFile is true (target ends with "/"), each entry in source is linked
+// individually into the target directory. Otherwise a single directory-level
+// symlink is planned at target.
+func (l *Linker) planPackage(name, source, target string, perFile bool, ignore []string) ([]LinkAction, error) {
 	info, err := os.Stat(source)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return []LinkAction{{
+				Package: name,
+				Source:  source,
+				Target:  target,
+				Op:      OpSourceNotFound,
+				Reason:  fmt.Sprintf("source directory %q does not exist", source),
+			}}, nil
+		}
 		return nil, fmt.Errorf("source %q: %w", source, err)
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("source %q is not a directory", source)
 	}
 
+	if perFile {
+		return l.planPerFile(name, source, target, ignore)
+	}
+
+	op, reason := l.classifyTarget(source, target)
+	return []LinkAction{{
+		Package: name,
+		Source:  source,
+		Target:  target,
+		Op:      op,
+		Reason:  reason,
+	}}, nil
+}
+
+// planPerFile creates individual link actions for each entry in source, linking
+// them into target. Entries matching ignore patterns receive OpSkip actions.
+func (l *Linker) planPerFile(name, source, target string, ignore []string) ([]LinkAction, error) {
+	entries, err := os.ReadDir(source)
+	if err != nil {
+		return nil, fmt.Errorf("reading source %q: %w", source, err)
+	}
+
 	var actions []LinkAction
+	for _, entry := range entries {
+		filename := entry.Name()
+		fileSrc := filepath.Join(source, filename)
+		fileTgt := filepath.Join(target, filename)
 
-	err = filepath.WalkDir(source, func(path string, d os.DirEntry, err error) error {
+		shouldIgnore, err := resolver.ShouldIgnore(filename, ignore)
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("checking ignore for %q: %w", filename, err)
 		}
-		if d.IsDir() {
-			return nil // only symlink files, not directories
-		}
-
-		ignored, err := resolver.ShouldIgnore(path, ignorePatterns)
-		if err != nil {
-			return fmt.Errorf("checking ignore for %q: %w", path, err)
-		}
-		if ignored {
+		if shouldIgnore {
 			actions = append(actions, LinkAction{
 				Package: name,
-				Source:  path,
+				Source:  fileSrc,
+				Target:  fileTgt,
 				Op:      OpSkip,
-				Reason:  "matched ignore pattern",
+				Reason:  "ignored by pattern",
 			})
-			return nil
+			continue
 		}
 
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		linkTarget := filepath.Join(target, rel)
-
-		op, reason := l.classifyTarget(path, linkTarget)
+		op, reason := l.classifyTarget(fileSrc, fileTgt)
 		actions = append(actions, LinkAction{
 			Package: name,
-			Source:  path,
-			Target:  linkTarget,
+			Source:  fileSrc,
+			Target:  fileTgt,
 			Op:      op,
 			Reason:  reason,
 		})
-		return nil
-	})
+	}
 
-	return actions, err
+	return actions, nil
 }
 
 // classifyTarget determines the OpType for a given (source, target) pair by inspecting
@@ -198,9 +227,13 @@ func (l *Linker) PlanUntie(cfg *config.Config, packageNames []string) ([]LinkAct
 	}
 
 	for i, a := range actions {
-		if a.Op == OpExists {
+		switch a.Op {
+		case OpExists:
 			actions[i].Op = OpRemove
 			actions[i].Reason = "removing symlink"
+		case OpCreate:
+			actions[i].Op = OpSkip
+			actions[i].Reason = "not linked"
 		}
 	}
 	return actions, nil
@@ -216,10 +249,10 @@ func (l *Linker) Apply(actions []LinkAction) error {
 		switch a.Op {
 		case OpCreate:
 			if l.DryRun {
-				fmt.Fprintf(l.Writer, "[dry-run] create %s -> %s\n", a.Target, a.Source)
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] create %s -> %s\n", a.Target, a.Source)
 				continue
 			}
-			if err := os.MkdirAll(filepath.Dir(a.Target), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(a.Target), 0o755); err != nil {
 				errs = append(errs, fmt.Errorf("mkdir %q: %w", filepath.Dir(a.Target), err))
 				continue
 			}
@@ -227,30 +260,33 @@ func (l *Linker) Apply(actions []LinkAction) error {
 				errs = append(errs, fmt.Errorf("symlink %q -> %q: %w", a.Target, a.Source, err))
 				continue
 			}
-			fmt.Fprintf(l.Writer, "linked   %s -> %s\n", a.Target, a.Source)
+			_, _ = fmt.Fprintf(l.Writer, "linked   %s -> %s\n", a.Target, a.Source)
 
 		case OpRemove:
 			if l.DryRun {
-				fmt.Fprintf(l.Writer, "[dry-run] remove %s\n", a.Target)
+				_, _ = fmt.Fprintf(l.Writer, "[dry-run] remove %s\n", a.Target)
 				continue
 			}
 			if err := os.Remove(a.Target); err != nil {
 				errs = append(errs, fmt.Errorf("remove %q: %w", a.Target, err))
 				continue
 			}
-			fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "removed  %s\n", a.Target)
 
 		case OpExists:
 			// no-op, already correctly linked
 
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
 
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "[BROKEN]   %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[BROKEN]   %s: %s\n", a.Target, a.Reason)
 
 		case OpSkip:
 			// silent skip
+
+		case OpSourceNotFound:
+			// silent skip — source directory not present on this machine
 		}
 	}
 
@@ -274,19 +310,21 @@ func (l *Linker) Status(cfg *config.Config) error {
 		counts[a.Op]++
 		switch a.Op {
 		case OpExists:
-			fmt.Fprintf(l.Writer, "[OK]       %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[OK]       %s\n", a.Target)
 		case OpCreate:
-			fmt.Fprintf(l.Writer, "[MISSING]  %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[MISSING]  %s\n", a.Target)
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "[CONFLICT] %s: %s\n", a.Target, a.Reason)
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "[BROKEN]   %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "[BROKEN]   %s\n", a.Target)
 		case OpSkip:
 			// silent
+		case OpSourceNotFound:
+			_, _ = fmt.Fprintf(l.Writer, "[NO SOURCE] %s: %s\n", a.Package, a.Reason)
 		}
 	}
 
-	fmt.Fprintf(l.Writer, "\n%d ok, %d missing, %d conflict, %d broken\n",
+	_, _ = fmt.Fprintf(l.Writer, "\n%d ok, %d missing, %d conflict, %d broken\n",
 		counts[OpExists], counts[OpCreate], counts[OpConflict], counts[OpBroken])
 	return nil
 }
@@ -298,20 +336,22 @@ func (l *Linker) PrintPlan(actions []LinkAction) {
 		counts[a.Op]++
 		switch a.Op {
 		case OpCreate:
-			fmt.Fprintf(l.Writer, "  + %s -> %s\n", a.Target, a.Source)
+			_, _ = fmt.Fprintf(l.Writer, "  + %s -> %s\n", a.Target, a.Source)
 		case OpRemove:
-			fmt.Fprintf(l.Writer, "  - %s\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  - %s\n", a.Target)
 		case OpExists:
-			fmt.Fprintf(l.Writer, "  = %s (already linked)\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  = %s (already linked)\n", a.Target)
 		case OpConflict:
-			fmt.Fprintf(l.Writer, "  ! %s (conflict: %s)\n", a.Target, a.Reason)
+			_, _ = fmt.Fprintf(l.Writer, "  ! %s (conflict: %s)\n", a.Target, a.Reason)
 		case OpBroken:
-			fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
+			_, _ = fmt.Fprintf(l.Writer, "  ~ %s (broken symlink)\n", a.Target)
 		case OpSkip:
 			// silent
+		case OpSourceNotFound:
+			_, _ = fmt.Fprintf(l.Writer, "  ? %s (source not found)\n", a.Package)
 		}
 	}
 
-	fmt.Fprintf(l.Writer, "\nPlan: %d to create, %d to remove, %d already linked, %d conflicts\n",
+	_, _ = fmt.Fprintf(l.Writer, "\nPlan: %d to create, %d to remove, %d already linked, %d conflicts\n",
 		counts[OpCreate], counts[OpRemove], counts[OpExists], counts[OpConflict])
 }

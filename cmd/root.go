@@ -19,6 +19,7 @@ var rootCmd = &cobra.Command{
 	Long: `Knot manages your dotfiles via symlinks.
 It reads a Knotfile and creates or removes symlinks
 based on your package definitions.`,
+	RunE: runTUI,
 }
 
 // Execute runs the root command.
@@ -30,7 +31,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to Knotfile (default: auto-discover)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "path to Knotfile (default: $HOME/.dotfiles/Knotfile, override via KNOT_DIR)")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "print actions without executing them")
 }
 
@@ -41,18 +42,25 @@ func loadConfig() (*config.Config, string, error) {
 		return cfg, cfgFile, err
 	}
 
-	cwd, err := os.Getwd()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, "", fmt.Errorf("getting working directory: %w", err)
+		return nil, "", fmt.Errorf("getting home dir: %w", err)
 	}
 
-	path, err := config.FindConfigFile(cwd)
-	if err != nil {
-		return nil, "", err
-	}
-
+	path := config.DefaultKnotfilePath(home)
 	cfg, err := config.Load(path)
 	return cfg, path, err
+}
+
+// resolveTagArg expands a tag name into the sorted list of package names that carry it.
+// Returns an error if the tag is not found in any package.
+func resolveTagArg(tag string, cfg *config.Config) ([]string, error) {
+	byTag := config.PackagesByTag(cfg)
+	names, ok := byTag[tag]
+	if !ok {
+		return nil, fmt.Errorf("unknown tag %q", tag)
+	}
+	return names, nil
 }
 
 // resolvePackageArgs returns the list of packages to operate on.

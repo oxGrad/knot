@@ -1,0 +1,16 @@
+# knot tie/untie with an unknown package name exits with an error.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/nvim/.vimrc --
+" vim config
+-- dotfiles/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+! exec knot tie ghost
+stderr 'unknown package'
+
+! exec knot untie ghost
+stderr 'unknown package'
