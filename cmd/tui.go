@@ -45,7 +45,7 @@ var (
 		lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("28")).Bold(true),
 	}
-	styleMascotNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	styleMascotNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
 	styleMascotConflict = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
 	styleMascotMissing  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 )
@@ -147,23 +147,23 @@ const (
 
 // mascotFrames[state][frame][line] — each line is exactly 8 visual columns.
 var mascotFrames = [3][3][6]string{
-	// mascotNormal: green, slow blink
+	// mascotNormal: peach, blink (frame 1) + grin (frame 2)
 	{
-		{` ▄████▄ `, ` █ oo █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `██    ██`},
-		{` ▄████▄ `, ` █ -- █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `██    ██`},
-		{` ▄████▄ `, ` █ oo █ `, ` ▀████▀ `, `▐ ████ ▌`, ` ██  ██ `, `██    ██`},
+		{`  ▄▄▄▄  `, `▐(o  o)▌`, `▐( ▄▄ )▌`, `▐( ~~ )▌`, ` ▀(  )▀ `, `   ██   `},
+		{`  ▄▄▄▄  `, `▐(─  ─)▌`, `▐( ▄▄ )▌`, `▐( ~~ )▌`, ` ▀(  )▀ `, `   ██   `},
+		{`  ▄▄▄▄  `, `▐(o  o)▌`, `▐( ▄▄ )▌`, `▐( ^^ )▌`, ` ▀(  )▀ `, `   ██   `},
 	},
-	// mascotConflict: red, frantic
+	// mascotConflict: red, fur rises each frame + frantic eyes + bared teeth
 	{
-		{` ▄████▄ `, ` █ !! █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, ` /    \ `},
-		{` ▄████▄ `, ` █ ** █ `, ` ▀████▀ `, `  ████  `, `▌██  ██▐`, ` \    / `},
-		{` ▄████▄ `, ` █ XX █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `▌/    \▐`},
+		{`  ▄▄▄▄  `, `▐(>  <)▌`, `▐( ▄▄ )▌`, `▐( !! )▌`, ` ▀(  )▀ `, `   ██   `},
+		{` ▄▄▄▄▄▄ `, `▐(X  X)▌`, `▐( ▄▄ )▌`, `▐( ## )▌`, ` ▀(  )▀ `, `   ██   `},
+		{`▄▄▄▄▄▄▄▄`, `▐(*  *)▌`, `▐( ▄▄ )▌`, `▐( >> )▌`, ` ▀(  )▀ `, `   ██   `},
 	},
-	// mascotMissing: yellow, looking side-to-side
+	// mascotMissing: yellow, eyes dart side-to-side
 	{
-		{` ▄████▄ `, ` █ ?? █ `, ` ▀████▀ `, `   ██   `, `  ████  `, `  █  █  `},
-		{` ▄████▄ `, ` █??   █`, ` ▀████▀ `, `   ██   `, ` ████   `, ` █  █   `},
-		{` ▄████▄ `, ` █   ??█`, ` ▀████▀ `, `   ██   `, `   ████ `, `   █  █ `},
+		{`  ▄▄▄▄  `, `▐(o  .)▌`, `▐( ▄▄ )▌`, `▐( ?? )▌`, ` ▀(  )▀ `, `   ██   `},
+		{`  ▄▄▄▄  `, `▐(.  .)▌`, `▐( ▄▄ )▌`, `▐( ?? )▌`, ` ▀(  )▀ `, `   ██   `},
+		{`  ▄▄▄▄  `, `▐(.  o)▌`, `▐( ▄▄ )▌`, `▐( ?? )▌`, ` ▀(  )▀ `, `   ██   `},
 	},
 }
 
@@ -641,7 +641,7 @@ func (m model) renderBrandHeader() string {
 	b.WriteString("╭" + hLine + "╮\n")
 	// empty line
 	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
-	// 6 lines of KNOT art + knotman side-by-side; pad each row individually
+	// 6 lines of KNOT art + monkey mascot side-by-side; pad each row individually
 	// so mismatched art/mascot visual widths don't break the right border.
 	for i := 0; i < 6; i++ {
 		art := styleArt[i].Render(knotArt[i])
@@ -653,12 +653,12 @@ func (m model) renderBrandHeader() string {
 	// empty line
 	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
 	// subtitle / git info
-	subtitle := styleDim.Render("dotfiles manager")
+	versionLabel := "knot " + Version
+	subtitle := styleDim.Render(versionLabel)
 	if m.gitBranch != "" {
 		commitInfo := m.gitSHA
 		if m.gitCommitMsg != "" {
-			// reserve space for "dotfiles manager · on <branch> · <sha> "
-			overhead := len("dotfiles manager · on  · ") + len(m.gitBranch) + len(m.gitSHA) + 1
+			overhead := len(versionLabel+" · on  · ") + len(m.gitBranch) + len(m.gitSHA) + 1
 			maxMsgLen := max(innerW-leftPad-overhead, 10)
 			msg := []rune(m.gitCommitMsg)
 			if len(msg) > maxMsgLen {

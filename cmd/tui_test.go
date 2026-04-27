@@ -641,7 +641,7 @@ func TestViewList_NonEmpty(t *testing.T) {
 	if out == "" {
 		t.Error("viewList() returned empty string")
 	}
-	if !containsSubstr(out, "dotfiles manager") {
+	if !containsSubstr(out, "knot ") {
 		t.Error("viewList() should contain brand header")
 	}
 }
