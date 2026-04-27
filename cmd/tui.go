@@ -465,7 +465,7 @@ func (m *model) toggleTag(tr *tagRow) {
 			if !eligible(pkg) {
 				continue
 			}
-			if m.toggles[pkg.name] != false {
+			if m.toggles[pkg.name] {
 				allPending = false
 				break
 			}
@@ -487,7 +487,7 @@ func (m *model) toggleTag(tr *tagRow) {
 			if !eligible(pkg) {
 				continue
 			}
-			if m.toggles[pkg.name] != true {
+			if !m.toggles[pkg.name] {
 				allPending = false
 				break
 			}
@@ -510,7 +510,7 @@ func (m *model) toggleTag(tr *tagRow) {
 				continue
 			}
 			currentlyTied := pkg.status == statusTied || pkg.status == statusPartial
-			if !currentlyTied && m.toggles[pkg.name] != true {
+			if !currentlyTied && !m.toggles[pkg.name] {
 				allPending = false
 				break
 			}
