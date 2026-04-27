@@ -30,14 +30,14 @@ var (
 	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 
-	// header ASCII art gradient: bright-cyan (top) → dark-blue (bottom)
+	// header ASCII art gradient: light-green (top) → dark-green (bottom)
 	styleArt = [6]lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("87")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("69")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("57")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("120")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("83")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("40")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("28")).Bold(true),
 	}
 	styleMascotNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
 	styleMascotConflict = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
@@ -49,7 +49,7 @@ var (
 type pkgStatus int
 
 const (
-	statusUntied          pkgStatus = iota
+	statusUntied pkgStatus = iota
 	statusTied
 	statusPartial
 	statusConflict
@@ -119,7 +119,7 @@ var knotArt = [6]string{
 	`█████╔╝ ██╔██╗ ██║██║   ██║   ██║   `,
 	`██╔═██╗ ██║╚██╗██║██║   ██║   ██║   `,
 	`██║  ██╗██║ ╚████║╚██████╔╝   ██║   `,
-	`╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝   ╚═╝   `,
+	`╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝   `,
 }
 
 type mascotState int
@@ -130,25 +130,25 @@ const (
 	mascotMissing                     // no packages / no git repo
 )
 
-// mascotFrames[state][frame][line] — each line is exactly 7 visual columns.
+// mascotFrames[state][frame][line] — each line is exactly 8 visual columns.
 var mascotFrames = [3][3][6]string{
 	// mascotNormal: green, slow blink
 	{
-		{` ╭──╮  `, ` │oo│  `, ` ╰∞∞╯  `, `  ||   `, ` /||\  `, ` \__/  `},
-		{` ╭──╮  `, ` │--│  `, ` ╰∞∞╯  `, `  ||   `, ` /||\  `, ` \__/  `},
-		{` ╭──╮  `, ` │oo│  `, ` ╰∞∞╯  `, `  ||   `, `\/||\/  `, ` \__/  `},
+		{` ▄████▄ `, ` █ oo █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `██    ██`},
+		{` ▄████▄ `, ` █ -- █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `██    ██`},
+		{` ▄████▄ `, ` █ oo █ `, ` ▀████▀ `, `▐ ████ ▌`, ` ██  ██ `, `██    ██`},
 	},
 	// mascotConflict: red, frantic
 	{
-		{` ╭──╮  `, ` │!!│  `, ` ╰!!╯  `, `  ||   `, ` /||\  `, ` /  \  `},
-		{` ╭──╮  `, ` │**│  `, ` ╰XX╯  `, `  ||   `, ` \||/  `, ` /  \  `},
-		{` ╭──╮  `, ` │!!│  `, ` ╰~~╯  `, `  ||   `, `\/||\ `, ` \  \  `},
+		{` ▄████▄ `, ` █ !! █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, ` /    \ `},
+		{` ▄████▄ `, ` █ ** █ `, ` ▀████▀ `, `  ████  `, `▌██  ██▐`, ` \    / `},
+		{` ▄████▄ `, ` █ XX █ `, ` ▀████▀ `, `  ████  `, ` ██  ██ `, `▌/    \▐`},
 	},
 	// mascotMissing: yellow, looking side-to-side
 	{
-		{` ╭──╮  `, ` │??│  `, ` ╰..╯  `, `   |   `, `  / \  `, `   |   `},
-		{` ╭──╮  `, ` │? │  `, ` ╰..╯  `, `   |   `, ` / \   `, `   |   `},
-		{` ╭──╮  `, ` │ ?│  `, ` ╰..╯  `, `   |   `, `   / \ `, `   |   `},
+		{` ▄████▄ `, ` █ ?? █ `, ` ▀████▀ `, `   ██   `, `  ████  `, `  █  █  `},
+		{` ▄████▄ `, ` █??   █`, ` ▀████▀ `, `   ██   `, ` ████   `, ` █  █   `},
+		{` ▄████▄ `, ` █   ??█`, ` ▀████▀ `, `   ██   `, `   ████ `, `   █  █ `},
 	},
 }
 
@@ -163,7 +163,7 @@ type pkgRow struct {
 type tuiPhase int
 
 const (
-	phaseList     tuiPhase = iota
+	phaseList tuiPhase = iota
 	phaseConfirm
 	phaseApply
 	phaseResult
@@ -519,15 +519,11 @@ func (m model) renderBrandHeader() string {
 		mascotStyle = styleMascotNormal
 	}
 
-	const artW = 37   // visual width of each knotArt row
-	const mascotW = 7 // visual width of each mascot row
 	const leftPad = 2
 	const gap = 4
-	const contentW = leftPad + artW + gap + mascotW // 50
 
 	innerW := max(m.width, 62) - 2
 	hLine := strings.Repeat("─", innerW)
-	rightPad := strings.Repeat(" ", max(innerW-contentW, 0))
 
 	var b strings.Builder
 
@@ -535,11 +531,14 @@ func (m model) renderBrandHeader() string {
 	b.WriteString("╭" + hLine + "╮\n")
 	// empty line
 	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
-	// 6 lines of KNOT art + knotman side-by-side
+	// 6 lines of KNOT art + knotman side-by-side; pad each row individually
+	// so mismatched art/mascot visual widths don't break the right border.
 	for i := 0; i < 6; i++ {
 		art := styleArt[i].Render(knotArt[i])
 		mascot := mascotStyle.Render(mascotLines[i])
-		b.WriteString("│  " + art + strings.Repeat(" ", gap) + mascot + rightPad + "│\n")
+		content := "  " + art + strings.Repeat(" ", gap) + mascot
+		rowRightPad := strings.Repeat(" ", max(innerW-lipgloss.Width(content), 0))
+		b.WriteString("│" + content + rowRightPad + "│\n")
 	}
 	// empty line
 	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
@@ -1371,8 +1370,10 @@ func buildGitURL(provider, protocol, username, repo string) string {
 	return ""
 }
 
-type cloneDoneMsg     struct{ err error }
-type knotfileReadyMsg struct{ err error }
+type (
+	cloneDoneMsg     struct{ err error }
+	knotfileReadyMsg struct{ err error }
+)
 
 func cloneRepoCmd(url, dir string) tea.Cmd {
 	return func() tea.Msg {
@@ -1387,10 +1388,10 @@ func cloneRepoCmd(url, dir string) tea.Cmd {
 func writeKnotfileCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
 		knotfilePath := filepath.Join(dir, config.KnotfileName)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return knotfileReadyMsg{err: fmt.Errorf("creating directory: %w", err)}
 		}
-		if err := os.WriteFile(knotfilePath, exampleKnotfile, 0644); err != nil {
+		if err := os.WriteFile(knotfilePath, exampleKnotfile, 0o644); err != nil {
 			return knotfileReadyMsg{err: fmt.Errorf("writing Knotfile: %w", err)}
 		}
 		return knotfileReadyMsg{}
@@ -1640,7 +1641,7 @@ func (m setupModel) View() string {
 		b.WriteString("Enter the repository name:\n\n")
 		b.WriteString("  " + styleCyan.Render(m.inputBuf) + "█\n")
 		b.WriteString("\n" + styleDim.Render("enter to confirm · esc to go back · ctrl+c to quit"))
-		b.WriteString("\n" + styleDim.Render("Leave empty to use the default: ")+styleCyan.Render(".dotfiles"))
+		b.WriteString("\n" + styleDim.Render("Leave empty to use the default: ") + styleCyan.Render(".dotfiles"))
 		if m.err != nil {
 			b.WriteString("\n\n" + styleRed.Render(m.err.Error()))
 		}
