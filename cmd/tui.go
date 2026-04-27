@@ -20,6 +20,11 @@ import (
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
+const (
+	tuiMarginLeft  = 4
+	tuiMarginRight = 4
+)
+
 var (
 	styleBold    = lipgloss.NewStyle().Bold(true)
 	styleDim     = lipgloss.NewStyle().Faint(true)
@@ -29,6 +34,7 @@ var (
 	styleCyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleMargin  = lipgloss.NewStyle().PaddingLeft(tuiMarginLeft).PaddingRight(tuiMarginRight)
 
 	// header ASCII art gradient: light-green (top) → dark-green (bottom)
 	styleArt = [6]lipgloss.Style{
@@ -626,7 +632,7 @@ func (m model) renderBrandHeader() string {
 	const leftPad = 2
 	const gap = 4
 
-	innerW := max(m.width, 62) - 2
+	innerW := max(m.width-tuiMarginLeft-tuiMarginRight, 62) - 2
 	hLine := strings.Repeat("─", innerW)
 
 	var b strings.Builder
@@ -1125,25 +1131,28 @@ func (m model) buildConfirmLines() []string {
 // ── views ─────────────────────────────────────────────────────────────────────
 
 func (m model) View() string {
+	var v string
 	switch m.phase {
 	case phaseConfirm:
-		return m.viewConfirm()
+		v = m.viewConfirm()
 	case phaseApply:
-		return styleDim.Render("Applying changes...")
+		v = styleDim.Render("Applying changes...")
 	case phaseResult:
-		return m.viewResult()
+		v = m.viewResult()
 	case phaseGitPull:
-		return styleDim.Render(fmt.Sprintf("Running git pull in %s...", dotfilesDir(m.cfgPath)))
+		v = styleDim.Render(fmt.Sprintf("Running git pull in %s...", dotfilesDir(m.cfgPath)))
 	case phaseCheckout:
-		return styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
+		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
-		return m.viewBranch()
+		v = m.viewBranch()
 	default:
 		if m.activeTab == tabTags {
-			return m.viewTags()
+			v = m.viewTags()
+		} else {
+			v = m.viewList()
 		}
-		return m.viewList()
 	}
+	return styleMargin.Render(v)
 }
 
 func (m model) viewList() string {
@@ -1288,7 +1297,7 @@ func (m model) viewBranch() string {
 		title += styleDim.Render("  (on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(")")
 	}
 	b.WriteString(title + "\n")
-	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	b.WriteString(strings.Repeat("─", max(m.width-tuiMarginLeft-tuiMarginRight, 30)) + "\n")
 
 	if len(m.branches) == 0 {
 		b.WriteString(styleDim.Render("No branches found.") + "\n")
