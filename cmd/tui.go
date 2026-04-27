@@ -20,6 +20,11 @@ import (
 
 // ── styles ────────────────────────────────────────────────────────────────────
 
+const (
+	tuiMarginLeft  = 4
+	tuiMarginRight = 4
+)
+
 var (
 	styleBold    = lipgloss.NewStyle().Bold(true)
 	styleDim     = lipgloss.NewStyle().Faint(true)
@@ -29,6 +34,7 @@ var (
 	styleCyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
 	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
 	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleMargin  = lipgloss.NewStyle().PaddingLeft(tuiMarginLeft).PaddingRight(tuiMarginRight)
 
 	// header ASCII art gradient: light-green (top) → dark-green (bottom)
 	styleArt = [6]lipgloss.Style{
@@ -57,20 +63,29 @@ const (
 	statusSourceNotFound
 )
 
+const statusWidth = 9 // width of the widest label ("no source")
+
+func centerLabel(s string) string {
+	pad := statusWidth - len(s)
+	left := pad / 2
+	right := pad - left
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", right)
+}
+
 func (s pkgStatus) label() string {
 	switch s {
 	case statusTied:
-		return styleGreen.Render("tied   ")
+		return styleGreen.Render(centerLabel("tied"))
 	case statusUntied:
-		return styleDim.Render("untied ")
+		return styleDim.Render(centerLabel("untied"))
 	case statusPartial:
-		return styleYellow.Render("partial")
+		return styleYellow.Render(centerLabel("partial"))
 	case statusConflict:
-		return styleRed.Render("conflict")
+		return styleRed.Render(centerLabel("conflict"))
 	case statusSkipped:
-		return styleDim.Render("skipped")
+		return styleDim.Render(centerLabel("skipped"))
 	case statusSourceNotFound:
-		return styleYellow.Render("no source")
+		return styleYellow.Render(centerLabel("no source"))
 	}
 	return "unknown"
 }
@@ -274,6 +289,51 @@ type tagItem struct {
 	isLastChild bool    // for package items: is this the last child of its tag?
 }
 
+// ── pending helpers ───────────────────────────────────────────────────────────
+
+func (m *model) pkgPendingArrow(row pkgRow) string {
+	if !m.isPending(row) {
+		return ""
+	}
+	target := "untied"
+	if m.toggles[row.name] {
+		target = "tied"
+	}
+	return stylePending.Render(" -> " + target)
+}
+
+// tagWouldBeWord returns the word describing the aggregate state a tag would
+// reach if all current toggles were applied.
+func (m *model) tagWouldBeWord(tr *tagRow) string {
+	var tied, untied int
+	for _, pkg := range tr.pkgs {
+		if pkg.status == statusSkipped || pkg.status == statusConflict || pkg.status == statusSourceNotFound {
+			continue
+		}
+		if m.toggles[pkg.name] {
+			tied++
+		} else {
+			untied++
+		}
+	}
+	if tied > 0 && untied == 0 {
+		return "tied"
+	}
+	if untied > 0 && tied == 0 {
+		return "untied"
+	}
+	return "partial"
+}
+
+func (m *model) tagPendingArrow(tr *tagRow) string {
+	for _, pkg := range tr.pkgs {
+		if m.isPending(pkg) {
+			return stylePending.Render(" -> " + m.tagWouldBeWord(tr))
+		}
+	}
+	return ""
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func buildRows(cfg *config.Config, lnk *linker.Linker) ([]pkgRow, error) {
@@ -392,30 +452,80 @@ func (m *model) togglePackage(i int) {
 
 // toggleTag bulk-toggles all non-skipped, non-conflict packages in a tag.
 // tied → marks all for untie; untied or partial → marks missing for tie.
+// If the pending state already matches what the toggle would set, it reverts to seed state.
 func (m *model) toggleTag(tr *tagRow) {
+	eligible := func(pkg pkgRow) bool {
+		return pkg.status != statusSkipped && pkg.status != statusConflict
+	}
 	switch tr.status {
 	case statusTied:
+		// Check if already all pending-untie; if so, revert.
+		allPending := true
 		for _, pkg := range tr.pkgs {
-			if pkg.status == statusSkipped || pkg.status == statusConflict {
+			if !eligible(pkg) {
 				continue
 			}
-			m.toggles[pkg.name] = false
+			if m.toggles[pkg.name] {
+				allPending = false
+				break
+			}
+		}
+		want := false
+		if allPending {
+			want = true // revert to seed (tied → wantTied = true)
+		}
+		for _, pkg := range tr.pkgs {
+			if !eligible(pkg) {
+				continue
+			}
+			m.toggles[pkg.name] = want
 		}
 	case statusUntied:
+		// Check if already all pending-tie; if so, revert.
+		allPending := true
 		for _, pkg := range tr.pkgs {
-			if pkg.status == statusSkipped || pkg.status == statusConflict {
+			if !eligible(pkg) {
 				continue
 			}
-			m.toggles[pkg.name] = true
+			if !m.toggles[pkg.name] {
+				allPending = false
+				break
+			}
+		}
+		want := true
+		if allPending {
+			want = false // revert to seed (untied → wantTied = false)
+		}
+		for _, pkg := range tr.pkgs {
+			if !eligible(pkg) {
+				continue
+			}
+			m.toggles[pkg.name] = want
 		}
 	case statusPartial:
+		// Tie any untied packages. If all untied pkgs are already pending-tie, revert them.
+		allPending := true
 		for _, pkg := range tr.pkgs {
-			if pkg.status == statusSkipped || pkg.status == statusConflict {
+			if !eligible(pkg) {
+				continue
+			}
+			currentlyTied := pkg.status == statusTied || pkg.status == statusPartial
+			if !currentlyTied && !m.toggles[pkg.name] {
+				allPending = false
+				break
+			}
+		}
+		for _, pkg := range tr.pkgs {
+			if !eligible(pkg) {
 				continue
 			}
 			currentlyTied := pkg.status == statusTied || pkg.status == statusPartial
 			if !currentlyTied {
-				m.toggles[pkg.name] = true
+				if allPending {
+					m.toggles[pkg.name] = false // revert to seed
+				} else {
+					m.toggles[pkg.name] = true
+				}
 			}
 		}
 	}
@@ -427,8 +537,8 @@ func (m *model) listHeaderLines() int {
 }
 
 func (m *model) visibleHeight() int {
-	// header + blank + status + help
-	overhead := m.listHeaderLines() + 3
+	// header + blank line + list + blank + status + help
+	overhead := m.listHeaderLines() + 4
 	v := m.height - overhead
 	if v < 1 {
 		return 1
@@ -522,7 +632,7 @@ func (m model) renderBrandHeader() string {
 	const leftPad = 2
 	const gap = 4
 
-	innerW := max(m.width, 62) - 2
+	innerW := max(m.width-tuiMarginLeft-tuiMarginRight, 62) - 2
 	hLine := strings.Repeat("─", innerW)
 
 	var b strings.Builder
@@ -1021,25 +1131,28 @@ func (m model) buildConfirmLines() []string {
 // ── views ─────────────────────────────────────────────────────────────────────
 
 func (m model) View() string {
+	var v string
 	switch m.phase {
 	case phaseConfirm:
-		return m.viewConfirm()
+		v = m.viewConfirm()
 	case phaseApply:
-		return styleDim.Render("Applying changes...")
+		v = styleDim.Render("Applying changes...")
 	case phaseResult:
-		return m.viewResult()
+		v = m.viewResult()
 	case phaseGitPull:
-		return styleDim.Render(fmt.Sprintf("Running git pull in %s...", dotfilesDir(m.cfgPath)))
+		v = styleDim.Render(fmt.Sprintf("Running git pull in %s...", dotfilesDir(m.cfgPath)))
 	case phaseCheckout:
-		return styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
+		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
-		return m.viewBranch()
+		v = m.viewBranch()
 	default:
 		if m.activeTab == tabTags {
-			return m.viewTags()
+			v = m.viewTags()
+		} else {
+			v = m.viewList()
 		}
-		return m.viewList()
 	}
+	return styleMargin.Render(v)
 }
 
 func (m model) viewList() string {
@@ -1048,6 +1161,7 @@ func (m model) viewList() string {
 	// Header
 	b.WriteString(m.renderBrandHeader())
 	b.WriteString(m.renderTabHeader() + "\n")
+	b.WriteString("\n")
 
 	// Package list
 	if len(m.rows) == 0 {
@@ -1076,12 +1190,9 @@ func (m model) viewList() string {
 
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 
-			pending := "  "
-			if m.isPending(row) {
-				pending = stylePending.Render(" *")
-			}
+			pending := m.pkgPendingArrow(row)
 
-			fmt.Fprintf(&b, "%s%s  [%s]%s\n", cursor, name, row.status.label(), pending)
+			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
 		}
 	}
 
@@ -1145,13 +1256,7 @@ func (m model) viewTags() string {
 				if item.tag.collapsed {
 					collapsePrefix = styleDim.Render("▶ ")
 				}
-				pendingMark := "  "
-				for _, pkg := range item.tag.pkgs {
-					if m.isPending(pkg) {
-						pendingMark = stylePending.Render(" *")
-						break
-					}
-				}
+				pendingMark := m.tagPendingArrow(item.tag)
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
 				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
@@ -1163,10 +1268,11 @@ func (m model) viewTags() string {
 					connector = "└── "
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
-				fmt.Fprintf(&b, "%s  %s  [%s]\n",
+				pendingMark := m.pkgPendingArrow(*item.pkg)
+				fmt.Fprintf(&b, "%s  %s  [%s]%s\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
-					item.pkg.status.label())
+					item.pkg.status.label(), pendingMark)
 			}
 		}
 	}
@@ -1191,7 +1297,7 @@ func (m model) viewBranch() string {
 		title += styleDim.Render("  (on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(")")
 	}
 	b.WriteString(title + "\n")
-	b.WriteString(strings.Repeat("─", max(m.width, 30)) + "\n")
+	b.WriteString(strings.Repeat("─", max(m.width-tuiMarginLeft-tuiMarginRight, 30)) + "\n")
 
 	if len(m.branches) == 0 {
 		b.WriteString(styleDim.Render("No branches found.") + "\n")
