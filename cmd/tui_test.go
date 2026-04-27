@@ -336,9 +336,9 @@ func TestListHeaderLines_WithoutBranch(t *testing.T) {
 
 func TestVisibleHeight_Normal(t *testing.T) {
 	m := &model{height: 20}
-	// overhead = 12 (header) + 3 (blank+status+help) = 15; visible = 20 - 15 = 5
-	if got := m.visibleHeight(); got != 5 {
-		t.Errorf("expected 5 visible rows, got %d", got)
+	// overhead = 12 (header) + 4 (blank+blank+status+help) = 16; visible = 20 - 16 = 4
+	if got := m.visibleHeight(); got != 4 {
+		t.Errorf("expected 4 visible rows, got %d", got)
 	}
 }
 
@@ -351,9 +351,9 @@ func TestVisibleHeight_Minimum(t *testing.T) {
 
 func TestVisibleHeight_WithBranch(t *testing.T) {
 	m := &model{height: 20, gitBranch: "main"}
-	// overhead = 12 (header) + 3 = 15; visible = 20 - 15 = 5
-	if got := m.visibleHeight(); got != 5 {
-		t.Errorf("expected 5 visible rows with git branch, got %d", got)
+	// overhead = 12 (header) + 4 = 16; visible = 20 - 16 = 4
+	if got := m.visibleHeight(); got != 4 {
+		t.Errorf("expected 4 visible rows with git branch, got %d", got)
 	}
 }
 

@@ -87,7 +87,7 @@ func (s pkgStatus) label() string {
 	case statusSourceNotFound:
 		return styleYellow.Render(centerLabel("no source"))
 	}
-	return centerLabel("unknown")
+	return "unknown"
 }
 
 func computeStatus(actions []linker.LinkAction) pkgStatus {
