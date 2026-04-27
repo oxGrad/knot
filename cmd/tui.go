@@ -531,8 +531,8 @@ func (m *model) listHeaderLines() int {
 }
 
 func (m *model) visibleHeight() int {
-	// header + blank + status + help
-	overhead := m.listHeaderLines() + 3
+	// header + blank line + list + blank + status + help
+	overhead := m.listHeaderLines() + 4
 	v := m.height - overhead
 	if v < 1 {
 		return 1
@@ -1152,6 +1152,7 @@ func (m model) viewList() string {
 	// Header
 	b.WriteString(m.renderBrandHeader())
 	b.WriteString(m.renderTabHeader() + "\n")
+	b.WriteString("\n")
 
 	// Package list
 	if len(m.rows) == 0 {
@@ -1182,7 +1183,7 @@ func (m model) viewList() string {
 
 			pending := m.pkgPendingArrow(row)
 
-			fmt.Fprintf(&b, "%s%s  [%s]%s\n", cursor, name, row.status.label(), pending)
+			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
 		}
 	}
 
