@@ -319,15 +319,16 @@ func TestTogglePackage_ConflictIsNoop(t *testing.T) {
 
 func TestListHeaderLines_WithBranch(t *testing.T) {
 	m := &model{gitBranch: "main"}
-	if got := m.listHeaderLines(); got != 3 {
-		t.Errorf("expected 3 header lines with git branch, got %d", got)
+	// brand box (11) + tab header (1) = 12, regardless of git branch
+	if got := m.listHeaderLines(); got != 12 {
+		t.Errorf("expected 12 header lines with git branch, got %d", got)
 	}
 }
 
 func TestListHeaderLines_WithoutBranch(t *testing.T) {
 	m := &model{}
-	if got := m.listHeaderLines(); got != 2 {
-		t.Errorf("expected 2 header lines without git branch, got %d", got)
+	if got := m.listHeaderLines(); got != 12 {
+		t.Errorf("expected 12 header lines without git branch, got %d", got)
 	}
 }
 
@@ -335,9 +336,9 @@ func TestListHeaderLines_WithoutBranch(t *testing.T) {
 
 func TestVisibleHeight_Normal(t *testing.T) {
 	m := &model{height: 20}
-	// overhead = 2 (no branch) + 3 = 5; visible = 20 - 5 = 15
-	if got := m.visibleHeight(); got != 15 {
-		t.Errorf("expected 15 visible rows, got %d", got)
+	// overhead = 12 (header) + 3 (blank+status+help) = 15; visible = 20 - 15 = 5
+	if got := m.visibleHeight(); got != 5 {
+		t.Errorf("expected 5 visible rows, got %d", got)
 	}
 }
 
@@ -350,9 +351,9 @@ func TestVisibleHeight_Minimum(t *testing.T) {
 
 func TestVisibleHeight_WithBranch(t *testing.T) {
 	m := &model{height: 20, gitBranch: "main"}
-	// overhead = 3 (with branch) + 3 = 6; visible = 20 - 6 = 14
-	if got := m.visibleHeight(); got != 14 {
-		t.Errorf("expected 14 visible rows with git branch, got %d", got)
+	// overhead = 12 (header) + 3 = 15; visible = 20 - 15 = 5
+	if got := m.visibleHeight(); got != 5 {
+		t.Errorf("expected 5 visible rows with git branch, got %d", got)
 	}
 }
 
@@ -640,8 +641,8 @@ func TestViewList_NonEmpty(t *testing.T) {
 	if out == "" {
 		t.Error("viewList() returned empty string")
 	}
-	if !containsSubstr(out, "knot") {
-		t.Error("viewList() should contain 'knot' header")
+	if !containsSubstr(out, "dotfiles manager") {
+		t.Error("viewList() should contain brand header")
 	}
 }
 
