@@ -283,6 +283,51 @@ type tagItem struct {
 	isLastChild bool    // for package items: is this the last child of its tag?
 }
 
+// ── pending helpers ───────────────────────────────────────────────────────────
+
+func (m *model) pkgPendingArrow(row pkgRow) string {
+	if !m.isPending(row) {
+		return ""
+	}
+	target := "untied"
+	if m.toggles[row.name] {
+		target = "tied"
+	}
+	return stylePending.Render(" -> " + target)
+}
+
+// tagWouldBeWord returns the word describing the aggregate state a tag would
+// reach if all current toggles were applied.
+func (m *model) tagWouldBeWord(tr *tagRow) string {
+	var tied, untied int
+	for _, pkg := range tr.pkgs {
+		if pkg.status == statusSkipped || pkg.status == statusConflict || pkg.status == statusSourceNotFound {
+			continue
+		}
+		if m.toggles[pkg.name] {
+			tied++
+		} else {
+			untied++
+		}
+	}
+	if tied > 0 && untied == 0 {
+		return "tied"
+	}
+	if untied > 0 && tied == 0 {
+		return "untied"
+	}
+	return "partial"
+}
+
+func (m *model) tagPendingArrow(tr *tagRow) string {
+	for _, pkg := range tr.pkgs {
+		if m.isPending(pkg) {
+			return stylePending.Render(" -> " + m.tagWouldBeWord(tr))
+		}
+	}
+	return ""
+}
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 func buildRows(cfg *config.Config, lnk *linker.Linker) ([]pkgRow, error) {
@@ -1135,10 +1180,7 @@ func (m model) viewList() string {
 
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 
-			pending := "  "
-			if m.isPending(row) {
-				pending = stylePending.Render(" *")
-			}
+			pending := m.pkgPendingArrow(row)
 
 			fmt.Fprintf(&b, "%s%s  [%s]%s\n", cursor, name, row.status.label(), pending)
 		}
@@ -1204,13 +1246,7 @@ func (m model) viewTags() string {
 				if item.tag.collapsed {
 					collapsePrefix = styleDim.Render("▶ ")
 				}
-				pendingMark := "  "
-				for _, pkg := range item.tag.pkgs {
-					if m.isPending(pkg) {
-						pendingMark = stylePending.Render(" *")
-						break
-					}
-				}
+				pendingMark := m.tagPendingArrow(item.tag)
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
 				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
@@ -1222,10 +1258,7 @@ func (m model) viewTags() string {
 					connector = "└── "
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
-				pendingMark := "  "
-				if m.isPending(*item.pkg) {
-					pendingMark = stylePending.Render(" *")
-				}
+				pendingMark := m.pkgPendingArrow(*item.pkg)
 				fmt.Fprintf(&b, "%s  %s  [%s]%s\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
