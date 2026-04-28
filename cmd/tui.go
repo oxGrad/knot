@@ -45,9 +45,12 @@ var (
 		lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("28")).Bold(true),
 	}
-	styleMascotNormal   = lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
-	styleMascotConflict = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	styleMascotMissing  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleMascotNormal      = lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
+	styleMascotConflict    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
+	styleMascotMissing     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+	styleMascotJellyNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	styleMascotTentBlue    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
+	styleMascotTentRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
 )
 
 // ── pkg status ────────────────────────────────────────────────────────────────
@@ -145,8 +148,15 @@ const (
 	mascotMissing                     // no packages / no git repo
 )
 
-// mascotFrames[state][frame][line] — each line is exactly 8 visual columns.
-var mascotFrames = [3][3][6]string{
+type mascotCharacter int
+
+const (
+	mascotJellyfish mascotCharacter = iota // default; zero value = jellyfish on startup
+	mascotMonkey
+)
+
+// monkeyFrames[state][frame][line] — each line is exactly 8 visual columns.
+var monkeyFrames = [3][3][6]string{
 	// mascotNormal: peach, blink (frame 1) + grin (frame 2)
 	{
 		{`  ▄▄▄▄  `, `▐(o  o)▌`, `▐( ▄▄ )▌`, `▐( ~~ )▌`, ` ▀(  )▀ `, `   ██   `},
@@ -165,6 +175,41 @@ var mascotFrames = [3][3][6]string{
 		{`  ▄▄▄▄  `, `▐(.  .)▌`, `▐( ▄▄ )▌`, `▐( ?? )▌`, ` ▀(  )▀ `, `   ██   `},
 		{`  ▄▄▄▄  `, `▐(.  o)▌`, `▐( ▄▄ )▌`, `▐( ?? )▌`, ` ▀(  )▀ `, `   ██   `},
 	},
+}
+
+// jellyfishFrames[state][frame][line] — each line is exactly 8 visual columns.
+// Tentacle lines (index 4-5) use "|" (ASCII pipe U+007C) as a colour-split marker:
+// left 4 cols = bright blue (styleMascotTentBlue), right 4 cols = bright red (styleMascotTentRed).
+// Art uses │ (U+2502 box-drawing vertical) so there is no collision with the "|" marker.
+var jellyfishFrames = [3][3][6]string{
+	// mascotNormal: cyan bell, blink (frame 1) + grin (frame 2), tentacles wave A-B-A
+	{
+		{` ▄████▄ `, `▐ o  o ▌`, `▐  ~~  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
+		{` ▄████▄ `, `▐ ─  ─ ▌`, `▐  ~~  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
+		{` ▄████▄ `, `▐ o  o ▌`, `▐  ^^  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
+	},
+	// mascotConflict: red bell expands each frame + frantic eyes, tentacles wave A-B-A
+	{
+		{` ▄████▄ `, `▐ >  < ▌`, `▐  !!  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
+		{`▄██████▄`, `▐ X  X ▌`, `▐  ##  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
+		{`████████`, `▐ *  * ▌`, `▐  >>  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
+	},
+	// mascotMissing: yellow bell, eyes dart side-to-side, tentacles wave B-A-B
+	{
+		{` ▄████▄ `, `▐ o  . ▌`, `▐  ??  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
+		{` ▄████▄ `, `▐ .  . ▌`, `▐  ??  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
+		{` ▄████▄ `, `▐ .  o ▌`, `▐  ??  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
+	},
+}
+
+// renderMascotLine colours one mascot line. If the line contains a "|" (ASCII pipe U+007C)
+// split marker, the left half is rendered in bright blue and the right half in bright red
+// (jellyfish tentacles). Otherwise the whole line is rendered with bodyStyle.
+func renderMascotLine(line string, bodyStyle lipgloss.Style) string {
+	if idx := strings.Index(line, "|"); idx >= 0 {
+		return styleMascotTentBlue.Render(line[:idx]) + styleMascotTentRed.Render(line[idx+1:])
+	}
+	return bodyStyle.Render(line)
 }
 
 // ── model types ───────────────────────────────────────────────────────────────
@@ -219,7 +264,8 @@ type model struct {
 	statusMsg    string // inline error for editor failure etc.
 
 	width, height int
-	headerFrame   int // incremented every 600ms for mascot animation
+	headerFrame   int             // incremented every 600ms for mascot animation
+	mascotChar    mascotCharacter // which mascot to display; toggled with 'm'
 }
 
 // ── message types ─────────────────────────────────────────────────────────────
@@ -617,7 +663,13 @@ func (m model) renderBrandHeader() string {
 	} else {
 		frame = m.headerFrame % 3
 	}
-	mascotLines := mascotFrames[state][frame]
+	var frames [3][3][6]string
+	if m.mascotChar == mascotJellyfish {
+		frames = jellyfishFrames
+	} else {
+		frames = monkeyFrames
+	}
+	mascotLines := frames[state][frame]
 
 	var mascotStyle lipgloss.Style
 	switch state {
@@ -626,7 +678,11 @@ func (m model) renderBrandHeader() string {
 	case mascotMissing:
 		mascotStyle = styleMascotMissing
 	default:
-		mascotStyle = styleMascotNormal
+		if m.mascotChar == mascotJellyfish {
+			mascotStyle = styleMascotJellyNormal
+		} else {
+			mascotStyle = styleMascotNormal
+		}
 	}
 
 	const leftPad = 2
@@ -641,11 +697,11 @@ func (m model) renderBrandHeader() string {
 	b.WriteString("╭" + hLine + "╮\n")
 	// empty line
 	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
-	// 6 lines of KNOT art + monkey mascot side-by-side; pad each row individually
+	// 6 lines of KNOT art + mascot side-by-side; pad each row individually
 	// so mismatched art/mascot visual widths don't break the right border.
 	for i := 0; i < 6; i++ {
 		art := styleArt[i].Render(knotArt[i])
-		mascot := mascotStyle.Render(mascotLines[i])
+		mascot := renderMascotLine(mascotLines[i], mascotStyle)
 		content := "  " + art + strings.Repeat(" ", gap) + mascot
 		rowRightPad := strings.Repeat(" ", max(innerW-lipgloss.Width(content), 0))
 		b.WriteString("│" + content + rowRightPad + "│\n")
@@ -1018,6 +1074,8 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, editorCmd(m.cfgPath)
 	case "]":
 		m.activeTab = tabTags
+	case "m":
+		m.mascotChar = (m.mascotChar + 1) % 2
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
