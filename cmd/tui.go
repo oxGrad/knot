@@ -51,6 +51,7 @@ var (
 	styleMascotJellyNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	styleMascotTentBlue    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 	styleMascotTentRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	styleMascotRobotNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6188")).Bold(true)
 )
 
 // ── pkg status ────────────────────────────────────────────────────────────────
@@ -153,6 +154,7 @@ type mascotCharacter int
 const (
 	mascotJellyfish mascotCharacter = iota // default; zero value = jellyfish on startup
 	mascotMonkey
+	mascotRobot
 )
 
 // monkeyFrames[state][frame][line] — each line is exactly 8 visual columns.
@@ -199,6 +201,29 @@ var jellyfishFrames = [3][3][6]string{
 		{` ▄████▄ `, `▐ o  . ▌`, `▐  ??  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
 		{` ▄████▄ `, `▐ .  . ▌`, `▐  ??  ▌`, ` ▀████▀ `, `│╷│╷|║╿║╿`, `╵ ╵ |╵ ╵ `},
 		{` ▄████▄ `, `▐ .  o ▌`, `▐  ??  ▌`, ` ▀████▀ `, `╵╷╵╷|╵╿╵╿`, `│ │ |║ ║ `},
+	},
+}
+
+// robotFrames[state][frame][line] — each line is exactly 8 visual columns.
+// Blocky square-faced robot from new-mascot; eyes vary per frame/state.
+var robotFrames = [3][3][6]string{
+	// mascotNormal: pink, eyes blink
+	{
+		{`████████`, `█      █`, `█ ▀  ▄ █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ ─  ─ █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ ▄  ▀ █`, `█      █`, `██    ██`, ` ██████ `},
+	},
+	// mascotConflict: frantic eyes
+	{
+		{`████████`, `█      █`, `█ >  < █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ X  X █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ *  * █`, `█      █`, `██    ██`, ` ██████ `},
+	},
+	// mascotMissing: eyes dart side-to-side
+	{
+		{`████████`, `█      █`, `█ o  . █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ .  . █`, `█      █`, `██    ██`, ` ██████ `},
+		{`████████`, `█      █`, `█ .  o █`, `█      █`, `██    ██`, ` ██████ `},
 	},
 }
 
@@ -664,10 +689,13 @@ func (m model) renderBrandHeader() string {
 		frame = m.headerFrame % 3
 	}
 	var frames [3][3][6]string
-	if m.mascotChar == mascotJellyfish {
-		frames = jellyfishFrames
-	} else {
+	switch m.mascotChar {
+	case mascotMonkey:
 		frames = monkeyFrames
+	case mascotRobot:
+		frames = robotFrames
+	default:
+		frames = jellyfishFrames
 	}
 	mascotLines := frames[state][frame]
 
@@ -678,9 +706,12 @@ func (m model) renderBrandHeader() string {
 	case mascotMissing:
 		mascotStyle = styleMascotMissing
 	default:
-		if m.mascotChar == mascotJellyfish {
+		switch m.mascotChar {
+		case mascotRobot:
+			mascotStyle = styleMascotRobotNormal
+		case mascotJellyfish:
 			mascotStyle = styleMascotJellyNormal
-		} else {
+		default:
 			mascotStyle = styleMascotNormal
 		}
 	}
@@ -1075,7 +1106,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "]":
 		m.activeTab = tabTags
 	case "m":
-		m.mascotChar = (m.mascotChar + 1) % 2
+		m.mascotChar = (m.mascotChar + 1) % 3
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
