@@ -36,14 +36,15 @@ var (
 	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
 	styleMargin  = lipgloss.NewStyle().PaddingLeft(tuiMarginLeft).PaddingRight(tuiMarginRight)
 
-	// header ASCII art gradient: light-green (top) → dark-green (bottom)
-	styleArt = [6]lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("120")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("83")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("40")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("28")).Bold(true),
+	// header ASCII art gradient: light lavender (top) → deep purple (bottom)
+	styleBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc"))
+	styleArt    = [6]lipgloss.Style{
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#e9d5ff")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#d8b4fe")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#a855f7")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#9333ea")).Bold(true),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#7e22ce")).Bold(true),
 	}
 	styleMascotNormal      = lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
 	styleMascotConflict    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
@@ -51,7 +52,7 @@ var (
 	styleMascotJellyNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	styleMascotTentBlue    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
 	styleMascotTentRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	styleMascotRobotNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff6188")).Bold(true)
+	styleMascotRobotNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc")).Bold(true)
 )
 
 // ── pkg status ────────────────────────────────────────────────────────────────
@@ -152,9 +153,9 @@ const (
 type mascotCharacter int
 
 const (
-	mascotJellyfish mascotCharacter = iota // default; zero value = jellyfish on startup
+	mascotRobot mascotCharacter = iota // default; zero value = robot on startup
+	mascotJellyfish
 	mascotMonkey
-	mascotRobot
 )
 
 // monkeyFrames[state][frame][line] — each line is exactly 8 visual columns.
@@ -603,13 +604,13 @@ func (m *model) toggleTag(tr *tagRow) {
 }
 
 func (m *model) listHeaderLines() int {
-	// brand box (11 lines) + tab header (1 line) = 12
-	return 12
+	// blank + brand box (13 lines, tabs embedded in bottom border) = 14
+	return 14
 }
 
 func (m *model) visibleHeight() int {
-	// header + blank line + list + blank + status + help
-	overhead := m.listHeaderLines() + 4
+	// header + blank line + top indicator + list + bottom indicator + blank + status + help
+	overhead := m.listHeaderLines() + 6
 	v := m.height - overhead
 	if v < 1 {
 		return 1
@@ -653,8 +654,8 @@ func (m *model) adjustBranchOffset() {
 }
 
 func (m *model) tagVisibleHeight() int {
-	// header + git? + divider + tab header + blank + status + help = listHeaderLines + 4
-	overhead := m.listHeaderLines() + 4
+	// header + blank + top indicator + list + bottom indicator + blank + status + help
+	overhead := m.listHeaderLines() + 6
 	v := m.height - overhead
 	if v < 1 {
 		return 1
@@ -716,55 +717,76 @@ func (m model) renderBrandHeader() string {
 		}
 	}
 
-	const leftPad = 2
 	const gap = 4
+	// left section: 4 spaces + art (37) + gap (4) + mascot (8) + 3 padding = 56
+	const divX = 56
 
 	innerW := max(m.width-tuiMarginLeft-tuiMarginRight, 62) - 2
-	hLine := strings.Repeat("─", innerW)
+	rightW := max(innerW-divX-1, 0)
 
 	var b strings.Builder
 
-	// top border
-	b.WriteString("╭" + hLine + "╮\n")
-	// empty line
-	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
-	// 6 lines of KNOT art + mascot side-by-side; pad each row individually
-	// so mismatched art/mascot visual widths don't break the right border.
+	b.WriteString("\n")
+	// top border: ╭── Knot v0.1.0 ──...──┬──...──╮
+	titleName := styleBorder.Render("Knot")
+	titleVersion := styleDim.Render(" v" + Version)
+	titleSegment := " " + titleName + titleVersion + " "
+	titleSegmentW := lipgloss.Width(titleSegment)
+	leftTopFill := styleBorder.Render("──") + titleSegment + styleBorder.Render(strings.Repeat("─", max(divX-2-titleSegmentW, 0)))
+	rightTopFill := styleBorder.Render(strings.Repeat("─", rightW))
+	b.WriteString(styleBorder.Render("╭") + leftTopFill + styleBorder.Render("┬") + rightTopFill + styleBorder.Render("╮") + "\n")
+
+	// build right panel rows (top pad + welcome + spacer + 6 art + 1 empty + 1 bottom = 11)
+	// indices: top=0, welcome=1, spacer=2, art[0..5]=3..8, empty=9, bottom=10
+	rightRows := make([]string, 11)
+	fill := func(s string) string { return s + strings.Repeat(" ", max(rightW-lipgloss.Width(s), 0)) }
+	for i := range rightRows {
+		rightRows[i] = strings.Repeat(" ", rightW)
+	}
+	if m.gitBranch != "" {
+		rightRows[4] = fill(" " + styleDim.Render("branch  ") + styleCyan.Render(m.gitBranch))
+	}
+	if m.gitSHA != "" {
+		rightRows[5] = fill(" " + styleDim.Render("commit  ") + styleDim.Render(m.gitSHA))
+	}
+	if m.gitCommitMsg != "" {
+		maxMsgLen := max(rightW-len(" message  ")-1, 5)
+		msg := []rune(m.gitCommitMsg)
+		if len(msg) > maxMsgLen {
+			msg = append(msg[:maxMsgLen-1], '…')
+		}
+		rightRows[6] = fill(" " + styleDim.Render("message ") + string(msg))
+	}
+
+	writeRow := func(left, right string) {
+		b.WriteString(styleBorder.Render("│") + left + styleBorder.Render("│") + right + styleBorder.Render("│") + "\n")
+	}
+
+	// top padding
+	writeRow(strings.Repeat(" ", divX), rightRows[0])
+	// welcome line
+	username := os.Getenv("USER")
+	if username == "" {
+		username = os.Getenv("LOGNAME")
+	}
+	welcomeLeft := "    " + styleDim.Render("Welcome, ") + username + "!"
+	welcomeLeft += strings.Repeat(" ", max(divX-lipgloss.Width(welcomeLeft), 0))
+	writeRow(welcomeLeft, rightRows[1])
+	// spacer between welcome and art
+	writeRow(strings.Repeat(" ", divX), rightRows[2])
+	// 6 art rows
 	for i := 0; i < 6; i++ {
 		art := styleArt[i].Render(knotArt[i])
 		mascot := renderMascotLine(mascotLines[i], mascotStyle)
-		content := "  " + art + strings.Repeat(" ", gap) + mascot
-		rowRightPad := strings.Repeat(" ", max(innerW-lipgloss.Width(content), 0))
-		b.WriteString("│" + content + rowRightPad + "│\n")
+		leftContent := "    " + art + strings.Repeat(" ", gap) + mascot
+		leftContent += strings.Repeat(" ", max(divX-lipgloss.Width(leftContent), 0))
+		writeRow(leftContent, rightRows[3+i])
 	}
-	// empty line
-	b.WriteString("│" + strings.Repeat(" ", innerW) + "│\n")
-	// subtitle / git info
-	versionLabel := "knot " + Version
-	subtitle := styleDim.Render(versionLabel)
-	if m.gitBranch != "" {
-		commitInfo := m.gitSHA
-		if m.gitCommitMsg != "" {
-			overhead := len(versionLabel+" · on  · ") + len(m.gitBranch) + len(m.gitSHA) + 1
-			maxMsgLen := max(innerW-leftPad-overhead, 10)
-			msg := []rune(m.gitCommitMsg)
-			if len(msg) > maxMsgLen {
-				msg = append(msg[:maxMsgLen-1], '…')
-			}
-			commitInfo = m.gitSHA + " " + string(msg)
-		}
-		subtitle += styleDim.Render(" · on ") + styleCyan.Render(m.gitBranch) + styleDim.Render(" · "+commitInfo)
-	}
-	subtitleVisW := lipgloss.Width(subtitle)
-	subRightPad := strings.Repeat(" ", max(innerW-leftPad-subtitleVisW, 0))
-	b.WriteString("│  " + subtitle + subRightPad + "│\n")
-	// bottom border
-	b.WriteString("╰" + hLine + "╯\n")
+	// empty bottom line + subtitle row
+	writeRow(strings.Repeat(" ", divX), rightRows[9])
+	writeRow(strings.Repeat(" ", divX), rightRows[10])
 
-	return b.String()
-}
-
-func (m model) renderTabHeader() string {
+	// bottom border with embedded tabs: ╰── Packages │ Tags ──...──┴──...──╯
 	var pkgTab, tagTab string
 	if m.activeTab == tabPackages {
 		pkgTab = styleBold.Render("Packages")
@@ -773,7 +795,12 @@ func (m model) renderTabHeader() string {
 		pkgTab = styleDim.Render("Packages")
 		tagTab = styleBold.Render("Tags")
 	}
-	return " " + pkgTab + styleDim.Render(" │ ") + tagTab
+	tabSegment := " " + pkgTab + styleDim.Render(" · ") + tagTab + "  "
+	tabSegmentW := lipgloss.Width(tabSegment)
+	leftBottomFill := styleBorder.Render("── ") + tabSegment + styleBorder.Render(strings.Repeat("─", max(divX-3-tabSegmentW, 0)))
+	b.WriteString(styleBorder.Render("╰") + leftBottomFill + styleBorder.Render("┴") + styleBorder.Render(strings.Repeat("─", rightW)) + styleBorder.Render("╯") + "\n")
+
+	return b.String()
 }
 
 func (m model) hasConflicts() bool {
@@ -1249,7 +1276,6 @@ func (m model) viewList() string {
 
 	// Header
 	b.WriteString(m.renderBrandHeader())
-	b.WriteString(m.renderTabHeader() + "\n")
 	b.WriteString("\n")
 
 	// Package list
@@ -1269,6 +1295,12 @@ func (m model) viewList() string {
 			end = len(m.rows)
 		}
 
+		if m.offset > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ↑ %d more", m.offset)) + "\n")
+		} else {
+			b.WriteString("\n")
+		}
+
 		for i := m.offset; i < end; i++ {
 			row := m.rows[i]
 
@@ -1282,6 +1314,13 @@ func (m model) viewList() string {
 			pending := m.pkgPendingArrow(row)
 
 			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
+		}
+
+		below := len(m.rows) - end
+		if below > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ↓ %d more", below)) + "\n")
+		} else {
+			b.WriteString("\n")
 		}
 	}
 
@@ -1306,7 +1345,6 @@ func (m model) viewTags() string {
 
 	// Header
 	b.WriteString(m.renderBrandHeader())
-	b.WriteString(m.renderTabHeader() + "\n")
 	b.WriteString("\n")
 
 	items := visibleTagItems(m.tagRows)
@@ -1331,6 +1369,12 @@ func (m model) viewTags() string {
 		end := m.tagOffset + vh
 		if end > len(items) {
 			end = len(items)
+		}
+
+		if m.tagOffset > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ↑ %d more", m.tagOffset)) + "\n")
+		} else {
+			b.WriteString("\n")
 		}
 
 		for i := m.tagOffset; i < end; i++ {
@@ -1363,6 +1407,13 @@ func (m model) viewTags() string {
 					styleDim.Render(connector+pkgName),
 					item.pkg.status.label(), pendingMark)
 			}
+		}
+
+		below := len(items) - end
+		if below > 0 {
+			b.WriteString(styleDim.Render(fmt.Sprintf("  ↓ %d more", below)) + "\n")
+		} else {
+			b.WriteString("\n")
 		}
 	}
 
