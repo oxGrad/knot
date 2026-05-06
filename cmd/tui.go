@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-
 // ── entry point ───────────────────────────────────────────────────────────────
 
 func brandHeaderFn(width int) string {
@@ -70,20 +69,4 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
-}
-
-// ── utils ─────────────────────────────────────────────────────────────────────
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
