@@ -18,57 +18,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// ── styles ────────────────────────────────────────────────────────────────────
-
-const (
-	tuiMarginLeft  = 4
-	tuiMarginRight = 4
-)
-
-var (
-	styleBold    = lipgloss.NewStyle().Bold(true)
-	styleDim     = lipgloss.NewStyle().Faint(true)
-	styleGreen   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
-	styleRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
-	styleYellow  = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	styleCyan    = lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
-	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
-	stylePending = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	styleMargin  = lipgloss.NewStyle().PaddingLeft(tuiMarginLeft).PaddingRight(tuiMarginRight)
-
-	// header ASCII art gradient: light lavender (top) → deep purple (bottom)
-	styleBorder = lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc"))
-	styleArt    = [6]lipgloss.Style{
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#e9d5ff")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#d8b4fe")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#a855f7")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#9333ea")).Bold(true),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#7e22ce")).Bold(true),
-	}
-	styleMascotNormal      = lipgloss.NewStyle().Foreground(lipgloss.Color("#fab387"))
-	styleMascotConflict    = lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Bold(true)
-	styleMascotMissing     = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
-	styleMascotJellyNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	styleMascotTentBlue    = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	styleMascotTentRed     = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	styleMascotRobotNormal = lipgloss.NewStyle().Foreground(lipgloss.Color("#c084fc")).Bold(true)
-)
-
-// ── pkg status ────────────────────────────────────────────────────────────────
-
-type pkgStatus int
-
-const (
-	statusUntied pkgStatus = iota
-	statusTied
-	statusPartial
-	statusConflict
-	statusSkipped
-	statusSourceNotFound
-)
-
-const statusWidth = 9 // width of the widest label ("no source")
 
 func centerLabel(s string) string {
 	pad := statusWidth - len(s)
@@ -142,21 +91,6 @@ var knotArt = [6]string{
 	`╚═╝  ╚═╝╚═╝  ╚═══╝ ╚═════╝    ╚═╝   `,
 }
 
-type mascotState int
-
-const (
-	mascotNormal   mascotState = iota // idle
-	mascotConflict                    // package conflict detected
-	mascotMissing                     // no packages / no git repo
-)
-
-type mascotCharacter int
-
-const (
-	mascotRobot mascotCharacter = iota // default; zero value = robot on startup
-	mascotJellyfish
-	mascotMonkey
-)
 
 // monkeyFrames[state][frame][line] — each line is exactly 8 visual columns.
 var monkeyFrames = [3][3][6]string{
@@ -238,128 +172,6 @@ func renderMascotLine(line string, bodyStyle lipgloss.Style) string {
 	return bodyStyle.Render(line)
 }
 
-// ── model types ───────────────────────────────────────────────────────────────
-
-type pkgRow struct {
-	name    string
-	status  pkgStatus
-	actions []linker.LinkAction
-}
-
-type tuiPhase int
-
-const (
-	phaseList tuiPhase = iota
-	phaseConfirm
-	phaseApply
-	phaseResult
-	phaseGitPull
-	phaseBranch   // branch picker
-	phaseCheckout // checking out a branch
-)
-
-type model struct {
-	cfg     *config.Config
-	cfgPath string
-	lnk     *linker.Linker
-
-	rows    []pkgRow
-	cursor  int
-	offset  int
-	toggles map[string]bool
-
-	activeTab tabKind
-	tagRows   []tagRow
-	tagCursor int
-	tagOffset int
-
-	// git info shown in header
-	gitBranch    string
-	gitSHA       string
-	gitCommitMsg string
-
-	// branch picker state
-	branches     []string
-	branchCursor int
-	branchOffset int
-
-	phase        tuiPhase
-	confirmLines []string
-	applyLog     []string
-	applyErr     error
-	statusMsg    string // inline error for editor failure etc.
-
-	width, height int
-	headerFrame   int             // incremented every 600ms for mascot animation
-	mascotChar    mascotCharacter // which mascot to display; toggled with 'm'
-}
-
-// ── message types ─────────────────────────────────────────────────────────────
-
-type headerTickMsg struct{}
-
-type gitInfoMsg struct {
-	branch string
-	sha    string
-	msg    string
-	err    error
-}
-
-type gitPullResultMsg struct {
-	output string
-	err    error
-}
-
-type reloadMsg struct {
-	rows []pkgRow
-	cfg  *config.Config
-	err  error
-}
-
-type applyDoneMsg struct {
-	log []string
-	err error
-}
-
-type editorDoneMsg struct {
-	err error
-}
-
-type branchListMsg struct {
-	branches []string
-	err      error
-}
-
-type checkoutDoneMsg struct {
-	output string
-	err    error
-}
-
-// ── tab types ─────────────────────────────────────────────────────────────────
-
-type tabKind int
-
-const (
-	tabPackages tabKind = iota
-	tabTags
-)
-
-// ── tag types ─────────────────────────────────────────────────────────────────
-
-type tagRow struct {
-	name      string
-	status    pkgStatus
-	pkgs      []pkgRow
-	collapsed bool
-}
-
-type tagItem struct {
-	isTag       bool
-	tag         *tagRow // set when isTag == true
-	pkg         *pkgRow // set when isTag == false
-	tagName     string  // parent tag name (for package items)
-	isLastChild bool    // for package items: is this the last child of its tag?
-}
 
 // ── pending helpers ───────────────────────────────────────────────────────────
 
