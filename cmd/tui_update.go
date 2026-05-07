@@ -274,6 +274,8 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.phase = phaseConfirm
 	case "[":
 		m.activeTab = tabPackages
+	case "m":
+		m.mascotChar = (m.mascotChar + 1) % 3
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
