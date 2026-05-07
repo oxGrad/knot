@@ -181,7 +181,9 @@ func (m model) renderBrandHeader() string {
 		rightRows[6] = fill(" " + styleDim.Render("message ") + string(msg))
 	}
 	if m.phase == phaseGitPull {
-		rightRows[7] = fill(" " + styleDim.Render("pulling ") + styleDim.Render(dotfilesDir(m.cfgPath)+"..."))
+		heartbeat := [3]string{"·", "●", "·"}
+		dot := heartbeat[m.headerFrame%3]
+		rightRows[7] = fill(" " + styleCyan.Render(dot) + " " + styleDim.Render("pulling ") + styleDim.Render(dotfilesDir(m.cfgPath)+"..."))
 	}
 
 	writeRow := func(left, right string) {
