@@ -276,6 +276,9 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = tabPackages
 	case "m":
 		m.mascotChar = (m.mascotChar + 1) % 3
+	case "r":
+		m.phase = phaseGitPull
+		return m, gitPullCmd(m.cfgPath)
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}

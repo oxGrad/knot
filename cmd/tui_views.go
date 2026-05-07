@@ -180,6 +180,9 @@ func (m model) renderBrandHeader() string {
 		}
 		rightRows[6] = fill(" " + styleDim.Render("message ") + string(msg))
 	}
+	if m.phase == phaseGitPull {
+		rightRows[7] = fill(" " + styleDim.Render("pulling ") + styleDim.Render(dotfilesDir(m.cfgPath)+"..."))
+	}
 
 	writeRow := func(left, right string) {
 		b.WriteString(styleBorder.Render("│") + left + styleBorder.Render("│") + right + styleBorder.Render("│") + "\n")
@@ -231,8 +234,6 @@ func (m model) View() string {
 		v = styleDim.Render("Applying changes...")
 	case phaseResult:
 		v = m.viewResult()
-	case phaseGitPull:
-		v = styleDim.Render(fmt.Sprintf("Running git pull in %s...", dotfilesDir(m.cfgPath)))
 	case phaseCheckout:
 		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
@@ -394,7 +395,7 @@ func (m model) viewTags() string {
 	} else {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · [ ] tabs · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · r pull · [ ] tabs · q quit"))
 	return b.String()
 }
 
