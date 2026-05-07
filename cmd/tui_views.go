@@ -209,15 +209,20 @@ func (m model) renderBrandHeader() string {
 	writeRow(strings.Repeat(" ", divX), rightRows[9])
 	writeRow(strings.Repeat(" ", divX), rightRows[10])
 
-	var pkgTab, tagTab string
-	if m.activeTab == tabPackages {
-		pkgTab = styleBold.Render("Packages")
-		tagTab = styleDim.Render("Tags")
+	var tabSegment string
+	if m.phase == phaseConfirm {
+		tabSegment = " " + styleBold.Render("Pending changes") + "  "
 	} else {
-		pkgTab = styleDim.Render("Packages")
-		tagTab = styleBold.Render("Tags")
+		var pkgTab, tagTab string
+		if m.activeTab == tabPackages {
+			pkgTab = styleBold.Render("Packages")
+			tagTab = styleDim.Render("Tags")
+		} else {
+			pkgTab = styleDim.Render("Packages")
+			tagTab = styleBold.Render("Tags")
+		}
+		tabSegment = " " + pkgTab + styleDim.Render(" · ") + tagTab + "  "
 	}
-	tabSegment := " " + pkgTab + styleDim.Render(" · ") + tagTab + "  "
 	tabSegmentW := lipgloss.Width(tabSegment)
 	leftBottomFill := styleBorder.Render("── ") + tabSegment + styleBorder.Render(strings.Repeat("─", max(divX-3-tabSegmentW, 0)))
 	b.WriteString(styleBorder.Render("╰") + leftBottomFill + styleBorder.Render("┴") + styleBorder.Render(strings.Repeat("─", rightW)) + styleBorder.Render("╯") + "\n")
@@ -454,7 +459,8 @@ func (m model) viewBranch() string {
 
 func (m model) viewConfirm() string {
 	var b strings.Builder
-	b.WriteString(styleBold.Render("Pending changes:") + "\n")
+	b.WriteString(m.renderBrandHeader())
+	b.WriteString("\n")
 	for _, line := range m.confirmLines {
 		b.WriteString(styleCyan.Render(line) + "\n")
 	}
