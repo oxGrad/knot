@@ -347,3 +347,172 @@ func TestFindConfigFile_RelativePath(t *testing.T) {
 		t.Errorf("found = %q, want %q", found, knotPath)
 	}
 }
+
+func TestLoad_Include_Basic(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "work")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootKnot := "include:\n  - ./work\npackages:\n  zsh:\n    target: ~/\n"
+	subKnot := "packages:\n  nvim:\n    target: ~/.config/nvim\n"
+
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "Knotfile"), []byte(subKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(root, "Knotfile"))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if len(cfg.Packages) != 2 {
+		t.Fatalf("expected 2 packages, got %d: %v", len(cfg.Packages), cfg.Packages)
+	}
+	if _, ok := cfg.Packages["nvim"]; !ok {
+		t.Error("expected nvim package from included file")
+	}
+	if _, ok := cfg.Packages["zsh"]; !ok {
+		t.Error("expected zsh package from top-level")
+	}
+}
+
+func TestLoad_Include_TopLevelWins(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "work")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootKnot := "include:\n  - ./work\npackages:\n  nvim:\n    target: ~/.config/nvim-top\n"
+	subKnot := "packages:\n  nvim:\n    target: ~/.config/nvim-sub\n"
+
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "Knotfile"), []byte(subKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(root, "Knotfile"))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := cfg.Packages["nvim"].Target; got != "~/.config/nvim-top" {
+		t.Errorf("nvim target = %q, want %q (top-level should win)", got, "~/.config/nvim-top")
+	}
+}
+
+func TestLoad_Include_FirstWins(t *testing.T) {
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(root, "b")
+	if err := os.MkdirAll(a, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(b, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootKnot := "include:\n  - ./a\n  - ./b\n"
+	aKnot := "packages:\n  nvim:\n    target: ~/.config/nvim-a\n"
+	bKnot := "packages:\n  nvim:\n    target: ~/.config/nvim-b\n"
+
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a, "Knotfile"), []byte(aKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(b, "Knotfile"), []byte(bKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(root, "Knotfile"))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := cfg.Packages["nvim"].Target; got != "~/.config/nvim-a" {
+		t.Errorf("nvim target = %q, want %q (first include should win)", got, "~/.config/nvim-a")
+	}
+}
+
+func TestLoad_Include_NestedIgnored(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "work")
+	nested := filepath.Join(root, "nested")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootKnot := "include:\n  - ./work\npackages:\n  zsh:\n    target: ~/\n"
+	subKnot := "include:\n  - ../nested\npackages:\n  nvim:\n    target: ~/.config/nvim\n"
+	nestedKnot := "packages:\n  tmux:\n    target: ~/.tmux.conf\n"
+
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "Knotfile"), []byte(subKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "Knotfile"), []byte(nestedKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(root, "Knotfile"))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if _, ok := cfg.Packages["tmux"]; ok {
+		t.Error("tmux should not appear — nested includes must be ignored")
+	}
+	if len(cfg.Packages) != 2 {
+		t.Errorf("expected 2 packages (zsh, nvim), got %d: %v", len(cfg.Packages), cfg.Packages)
+	}
+}
+
+func TestLoad_Include_Missing(t *testing.T) {
+	root := t.TempDir()
+	rootKnot := "include:\n  - ./nonexistent\n"
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(filepath.Join(root, "Knotfile"))
+	if err == nil {
+		t.Error("expected error when included directory has no Knotfile")
+	}
+}
+
+func TestLoad_Include_RelativePaths(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "work")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	rootKnot := "include:\n  - ./work\n"
+	subKnot := "packages:\n  nvim:\n    target: ~/.config/nvim\n"
+
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "Knotfile"), []byte(subKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(root, "Knotfile"))
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	want := filepath.Join(sub, "nvim")
+	if got := cfg.Packages["nvim"].Source; got != want {
+		t.Errorf("nvim source = %q, want %q (should be relative to sub dir)", got, want)
+	}
+}
