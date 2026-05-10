@@ -404,6 +404,9 @@ func TestLoad_Include_TopLevelWins(t *testing.T) {
 	if got := cfg.Packages["nvim"].Target; got != "~/.config/nvim-top" {
 		t.Errorf("nvim target = %q, want %q (top-level should win)", got, "~/.config/nvim-top")
 	}
+	if len(cfg.Packages) != 1 {
+		t.Errorf("expected 1 package, got %d: %v", len(cfg.Packages), cfg.Packages)
+	}
 }
 
 func TestLoad_Include_FirstWins(t *testing.T) {
@@ -437,6 +440,9 @@ func TestLoad_Include_FirstWins(t *testing.T) {
 	}
 	if got := cfg.Packages["nvim"].Target; got != "~/.config/nvim-a" {
 		t.Errorf("nvim target = %q, want %q (first include should win)", got, "~/.config/nvim-a")
+	}
+	if len(cfg.Packages) != 1 {
+		t.Errorf("expected 1 package, got %d: %v", len(cfg.Packages), cfg.Packages)
 	}
 }
 
@@ -477,9 +483,27 @@ func TestLoad_Include_NestedIgnored(t *testing.T) {
 	}
 }
 
-func TestLoad_Include_Missing(t *testing.T) {
+func TestLoad_Include_DirectoryMissing(t *testing.T) {
 	root := t.TempDir()
 	rootKnot := "include:\n  - ./nonexistent\n"
+	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(filepath.Join(root, "Knotfile"))
+	if err == nil {
+		t.Error("expected error when included directory has no Knotfile")
+	}
+}
+
+func TestLoad_Include_NoKnotfile(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "empty")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// directory exists but has no Knotfile inside it
+	rootKnot := "include:\n  - ./empty\n"
 	if err := os.WriteFile(filepath.Join(root, "Knotfile"), []byte(rootKnot), 0644); err != nil {
 		t.Fatal(err)
 	}
