@@ -12,6 +12,7 @@ import (
 // Config is the top-level structure parsed from Knotfile.
 type Config struct {
 	Packages map[string]Package `yaml:"packages"`
+	Include  []string           `yaml:"include,omitempty"`
 }
 
 // Package describes one managed dotfile bundle.
@@ -28,9 +29,9 @@ type Condition struct {
 	OS string `yaml:"os"`
 }
 
-// Load reads and parses a Knotfile at the given path.
-// All relative paths inside the config are resolved relative to the config file's directory.
-func Load(path string) (*Config, error) {
+// loadOne reads and parses a single Knotfile at path, resolving source paths
+// relative to the file's directory. It does not process Include entries.
+func loadOne(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config %q: %w", path, err)
@@ -45,8 +46,6 @@ func Load(path string) (*Config, error) {
 		cfg.Packages = make(map[string]Package)
 	}
 
-	// Resolve source paths relative to the config file's directory.
-	// If source is omitted, default to ./<package-name>.
 	dir := filepath.Dir(path)
 	for name, pkg := range cfg.Packages {
 		if pkg.Source == "" {
@@ -59,6 +58,36 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Load reads and parses a Knotfile at the given path, merging packages from
+// any directories listed under include:. Top-level packages take priority over
+// included ones; among included files the first listed wins.
+func Load(path string) (*Config, error) {
+	top, err := loadOne(path)
+	if err != nil {
+		return nil, err
+	}
+
+	topDir := filepath.Dir(path)
+	for _, incDir := range top.Include {
+		if !filepath.IsAbs(incDir) {
+			incDir = filepath.Join(topDir, incDir)
+		}
+		incPath := filepath.Join(incDir, KnotfileName)
+		inc, err := loadOne(incPath)
+		if err != nil {
+			return nil, fmt.Errorf("include %q: %w", incDir, err)
+		}
+		for name, pkg := range inc.Packages {
+			if _, exists := top.Packages[name]; !exists {
+				top.Packages[name] = pkg
+			}
+		}
+	}
+
+	top.Include = nil
+	return top, nil
 }
 
 // KnotfileName is the canonical name of the configuration file.

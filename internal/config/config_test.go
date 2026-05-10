@@ -309,6 +309,24 @@ func TestPackagesByTag_Empty(t *testing.T) {
 	}
 }
 
+func TestLoadOne_ResolvesSourceRelativeToItself(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  nvim:\n    target: ~/.config/nvim\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadOne(path)
+	if err != nil {
+		t.Fatalf("loadOne() error: %v", err)
+	}
+	want := filepath.Join(dir, "nvim")
+	if cfg.Packages["nvim"].Source != want {
+		t.Errorf("source = %q, want %q", cfg.Packages["nvim"].Source, want)
+	}
+}
+
 func TestFindConfigFile_RelativePath(t *testing.T) {
 	// Change into a temp directory so a relative path resolution is meaningful.
 	root := t.TempDir()
