@@ -1,0 +1,29 @@
+# knot tie merges packages from an included Knotfile directory.
+env KNOT_DIR=$WORK/dotfiles
+
+-- dotfiles/zsh/.zshrc --
+# zsh config
+-- dotfiles/work/nvim/init.lua --
+-- lua config
+-- dotfiles/work/Knotfile --
+packages:
+  nvim:
+    source: ./nvim
+    target: ~/nvim-config
+
+-- dotfiles/Knotfile --
+include:
+  - ./work
+packages:
+  zsh:
+    source: ./zsh
+    target: ~/zsh-config
+
+exec knot tie
+stdout 'linked'
+
+# Symlinks from top-level package must exist.
+exists $HOME/zsh-config/.zshrc
+
+# Symlinks from included package must exist.
+exists $HOME/nvim-config/init.lua
