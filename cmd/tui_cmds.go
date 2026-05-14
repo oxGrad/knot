@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -125,6 +126,92 @@ func applyCmd(cfg *config.Config, lnk *linker.Linker, rows []pkgRow, toggles map
 
 		return applyDoneMsg{log: log, err: errors.Join(errs...)}
 	}
+}
+
+// checkVersionCmd checks if binName is in PATH and retrieves its version string.
+func checkVersionCmd(pkgName, binName string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := exec.LookPath(binName)
+		if err != nil {
+			return versionCheckMsg{pkgName: pkgName, found: false}
+		}
+		out, _ := exec.Command(path, "--version").CombinedOutput()
+		version := ""
+		if len(out) > 0 {
+			lines := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
+			version = strings.TrimSpace(lines[0])
+		}
+		return versionCheckMsg{pkgName: pkgName, found: true, version: version}
+	}
+}
+
+// installCmd wraps a pre-built exec.Cmd in tea.ExecProcess, returning installDoneMsg when done.
+func installCmd(pkgName string, c *exec.Cmd) tea.Cmd {
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return installDoneMsg{pkgName: pkgName, err: err}
+	})
+}
+
+// buildInstallCommand constructs the OS command for the given manager and install config.
+// Returns nil if the relevant field is empty.
+func buildInstallCommand(kind pkgManagerKind, install *config.Install) *exec.Cmd {
+	switch kind {
+	case pkgMgrBrew:
+		if install.Brew == "" {
+			return nil
+		}
+		return exec.Command("brew", "install", install.Brew)
+	case pkgMgrApt:
+		if install.Apt == "" {
+			return nil
+		}
+		return exec.Command("sudo", "apt-get", "install", "-y", install.Apt)
+	case pkgMgrDnf:
+		if install.Dnf == "" {
+			return nil
+		}
+		return exec.Command("sudo", "dnf", "install", "-y", install.Dnf)
+	case pkgMgrScript:
+		if install.Script == "" {
+			return nil
+		}
+		return exec.Command("bash", "-c", fmt.Sprintf("curl -fsSL %s | bash", install.Script))
+	}
+	return nil
+}
+
+// detectAvailableManagers returns the configured managers and a map indicating PATH availability.
+func detectAvailableManagers(install *config.Install) ([]pkgManagerKind, map[pkgManagerKind]bool) {
+	var mgrs []pkgManagerKind
+	avail := make(map[pkgManagerKind]bool)
+	check := func(kind pkgManagerKind, field string) {
+		if field == "" {
+			return
+		}
+		mgrs = append(mgrs, kind)
+		_, err := exec.LookPath(kind.binary())
+		avail[kind] = (err == nil)
+	}
+	check(pkgMgrBrew, install.Brew)
+	check(pkgMgrApt, install.Apt)
+	check(pkgMgrDnf, install.Dnf)
+	check(pkgMgrScript, install.Script)
+	return mgrs, avail
+}
+
+// renderInstallCommandPreview returns the command string shown in the install selection UI.
+func renderInstallCommandPreview(kind pkgManagerKind, install *config.Install) string {
+	switch kind {
+	case pkgMgrBrew:
+		return "brew install " + install.Brew
+	case pkgMgrApt:
+		return "sudo apt-get install -y " + install.Apt
+	case pkgMgrDnf:
+		return "sudo dnf install -y " + install.Dnf
+	case pkgMgrScript:
+		return "curl -fsSL " + install.Script + " | bash"
+	}
+	return ""
 }
 
 func editorCmd(cfgPath string) tea.Cmd {

@@ -240,6 +240,8 @@ func (m model) View() string {
 		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
 		v = m.viewBranch()
+	case phaseInstallSelect:
+		v = m.viewInstallSelect()
 	default:
 		if m.activeTab == tabTags {
 			v = m.viewTags()
@@ -266,6 +268,15 @@ func (m model) viewList() string {
 			}
 		}
 
+		// Show version column only when at least one package has install.bin configured.
+		anyInstall := false
+		for _, r := range m.rows {
+			if pkg, ok := m.cfg.Packages[r.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
+				anyInstall = true
+				break
+			}
+		}
+
 		visibleRows := m.visibleHeight()
 		end := m.offset + visibleRows
 		if end > len(m.rows) {
@@ -288,7 +299,24 @@ func (m model) viewList() string {
 
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 			pending := m.pkgPendingArrow(row)
-			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
+
+			verCol := ""
+			if anyInstall {
+				if pkg, ok := m.cfg.Packages[row.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
+					checked := m.versionChecked[row.name]
+					ver := m.versions[row.name]
+					switch {
+					case !checked:
+						verCol = "  " + styleDim.Render("...")
+					case ver == "":
+						verCol = "  " + styleDim.Render("not installed")
+					default:
+						verCol = "  " + styleDim.Render(ver)
+					}
+				}
+			}
+
+			fmt.Fprintf(&b, "%s  %s  [%s]%s%s\n", cursor, name, row.status.label(), verCol, pending)
 		}
 
 		below := len(m.rows) - end
@@ -309,7 +337,7 @@ func (m model) viewList() string {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
 
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · b branch · r pull · e edit · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · i install · b branch · r pull · e edit · q quit"))
 
 	return b.String()
 }
@@ -475,5 +503,46 @@ func (m model) viewResult() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render("Press any key to return."))
+	return b.String()
+}
+
+func (m model) viewInstallSelect() string {
+	var b strings.Builder
+
+	pkg := m.cfg.Packages[m.installPkg]
+
+	title := styleBold.Render("Install ") + m.installPkg
+	b.WriteString(title + "\n")
+	b.WriteString(strings.Repeat("─", max(m.width-tuiMarginLeft-tuiMarginRight, 30)) + "\n")
+
+	if pkg.Install != nil && len(pkg.Install.Deps) > 0 {
+		b.WriteString("\n  " + styleDim.Render("Dependencies: ") + strings.Join(pkg.Install.Deps, ", ") + "\n")
+	}
+	b.WriteString("\n")
+
+	for i, kind := range m.installMgrs {
+		cursor := "  "
+		if i == m.installCursor {
+			cursor = styleCursor.Render("▶ ")
+		}
+
+		label := fmt.Sprintf("%-5s", kind.label())
+		cmdStr := renderInstallCommandPreview(kind, pkg.Install)
+
+		suffix := ""
+		if !m.installAvail[kind] {
+			suffix = "  " + styleDim.Render("(not available)")
+		}
+
+		fmt.Fprintf(&b, "%s%s  %s%s\n",
+			cursor,
+			styleDim.Render(label),
+			cmdStr,
+			suffix,
+		)
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styleDim.Render("↑↓/jk navigate · enter install · esc cancel"))
 	return b.String()
 }

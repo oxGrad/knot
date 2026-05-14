@@ -6,6 +6,45 @@ import (
 	"github.com/oxgrad/knot/internal/linker"
 )
 
+// ── package manager ───────────────────────────────────────────────────────────
+
+type pkgManagerKind int
+
+const (
+	pkgMgrBrew   pkgManagerKind = iota
+	pkgMgrApt
+	pkgMgrDnf
+	pkgMgrScript
+)
+
+func (k pkgManagerKind) label() string {
+	switch k {
+	case pkgMgrBrew:
+		return "brew"
+	case pkgMgrApt:
+		return "apt"
+	case pkgMgrDnf:
+		return "dnf"
+	case pkgMgrScript:
+		return "curl"
+	}
+	return "unknown"
+}
+
+func (k pkgManagerKind) binary() string {
+	switch k {
+	case pkgMgrBrew:
+		return "brew"
+	case pkgMgrApt:
+		return "apt-get"
+	case pkgMgrDnf:
+		return "dnf"
+	case pkgMgrScript:
+		return "curl"
+	}
+	return ""
+}
+
 // ── layout constants ──────────────────────────────────────────────────────────
 
 const (
@@ -119,6 +158,7 @@ const (
 	phaseGitPull
 	phaseBranch
 	phaseCheckout
+	phaseInstallSelect
 )
 
 // ── model ─────────────────────────────────────────────────────────────────────
@@ -155,6 +195,17 @@ type model struct {
 	width, height int
 	headerFrame   int
 	mascotChar    mascotCharacter
+
+	// version checking
+	versions       map[string]string      // pkgName -> version string (only set when found)
+	versionChecked map[string]bool        // pkgName -> true once async check completed
+
+	// install flow
+	installPkg    string                 // package being installed
+	installMgrs   []pkgManagerKind       // configured managers for installPkg
+	installAvail  map[pkgManagerKind]bool // whether each mgr binary is in PATH
+	installCursor int
+	installOffset int
 }
 
 // ── message types ─────────────────────────────────────────────────────────────
@@ -194,4 +245,15 @@ type branchListMsg struct {
 type checkoutDoneMsg struct {
 	output string
 	err    error
+}
+
+type versionCheckMsg struct {
+	pkgName string
+	version string
+	found   bool // true if exec.LookPath succeeded
+}
+
+type installDoneMsg struct {
+	pkgName string
+	err     error
 }
