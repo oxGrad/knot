@@ -15,8 +15,12 @@ func (m model) Init() tea.Cmd {
 		headerTickCmd(),
 	}
 	for _, row := range m.rows {
-		if pkg, ok := m.cfg.Packages[row.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
-			cmds = append(cmds, checkVersionCmd(row.name, pkg.Install.Bin))
+		if pkg, ok := m.cfg.Packages[row.name]; ok {
+			bin := row.name
+			if pkg.Install != nil && pkg.Install.Bin != "" {
+				bin = pkg.Install.Bin
+			}
+			cmds = append(cmds, checkVersionCmd(row.name, bin))
 		}
 	}
 	return tea.Batch(cmds...)
@@ -71,10 +75,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.phase = phaseList
 		var cmd tea.Cmd
-		if pkg, ok := m.cfg.Packages[msg.pkgName]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
+		if pkg, ok := m.cfg.Packages[msg.pkgName]; ok {
+			bin := msg.pkgName
+			if pkg.Install != nil && pkg.Install.Bin != "" {
+				bin = pkg.Install.Bin
+			}
 			delete(m.versions, msg.pkgName)
 			m.versionChecked[msg.pkgName] = false
-			cmd = checkVersionCmd(msg.pkgName, pkg.Install.Bin)
+			cmd = checkVersionCmd(msg.pkgName, bin)
 		}
 		return m, cmd
 
@@ -159,8 +167,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.versions, k)
 		}
 		for _, row := range m.rows {
-			if pkg, ok := m.cfg.Packages[row.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
-				vCmds = append(vCmds, checkVersionCmd(row.name, pkg.Install.Bin))
+			if pkg, ok := m.cfg.Packages[row.name]; ok {
+				bin := row.name
+				if pkg.Install != nil && pkg.Install.Bin != "" {
+					bin = pkg.Install.Bin
+				}
+				vCmds = append(vCmds, checkVersionCmd(row.name, bin))
 			}
 		}
 		if len(vCmds) > 0 {
@@ -235,7 +247,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmLines = m.buildConfirmLines()
 		m.phase = phaseConfirm
-	case "r":
+	case "p":
 		m.phase = phaseGitPull
 		return m, gitPullCmd(m.cfgPath)
 	case "b":
@@ -353,7 +365,7 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = tabPackages
 	case "m":
 		m.mascotChar = (m.mascotChar + 1) % 3
-	case "r":
+	case "p":
 		m.phase = phaseGitPull
 		return m, gitPullCmd(m.cfgPath)
 	case "q", "ctrl+c":

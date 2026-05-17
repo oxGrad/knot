@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -14,6 +15,12 @@ import (
 	"github.com/oxgrad/knot/internal/config"
 	"github.com/oxgrad/knot/internal/linker"
 )
+
+var versionRe = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)*[a-zA-Z]?(?:[-+][a-zA-Z0-9.]+)*`)
+
+func extractVersion(output string) string {
+	return versionRe.FindString(output)
+}
 
 func dotfilesDir(cfgPath string) string {
 	return filepath.Dir(cfgPath)
@@ -129,19 +136,20 @@ func applyCmd(cfg *config.Config, lnk *linker.Linker, rows []pkgRow, toggles map
 }
 
 // checkVersionCmd checks if binName is in PATH and retrieves its version string.
+// It tries --version first, then falls back to the version subcommand (e.g. k9s).
 func checkVersionCmd(pkgName, binName string) tea.Cmd {
 	return func() tea.Msg {
 		path, err := exec.LookPath(binName)
 		if err != nil {
 			return versionCheckMsg{pkgName: pkgName, found: false}
 		}
-		out, _ := exec.Command(path, "--version").CombinedOutput()
-		version := ""
-		if len(out) > 0 {
-			lines := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)
-			version = strings.TrimSpace(lines[0])
+		for _, args := range [][]string{{"--version"}, {"-V"}, {"version"}} {
+			out, _ := exec.Command(path, args...).CombinedOutput()
+			if v := extractVersion(string(out)); v != "" {
+				return versionCheckMsg{pkgName: pkgName, found: true, version: v}
+			}
 		}
-		return versionCheckMsg{pkgName: pkgName, found: true, version: version}
+		return versionCheckMsg{pkgName: pkgName, found: true, version: ""}
 	}
 }
 

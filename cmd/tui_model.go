@@ -250,7 +250,7 @@ type checkoutDoneMsg struct {
 type versionCheckMsg struct {
 	pkgName string
 	version string
-	found   bool // true if exec.LookPath succeeded
+	found   bool
 }
 
 type installDoneMsg struct {

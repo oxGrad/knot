@@ -268,12 +268,10 @@ func (m model) viewList() string {
 			}
 		}
 
-		// Show version column only when at least one package has install.bin configured.
-		anyInstall := false
+		verWidth := len("not installed")
 		for _, r := range m.rows {
-			if pkg, ok := m.cfg.Packages[r.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
-				anyInstall = true
-				break
+			if ver := m.versions[r.name]; len(ver) > verWidth {
+				verWidth = len(ver)
 			}
 		}
 
@@ -300,23 +298,22 @@ func (m model) viewList() string {
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 			pending := m.pkgPendingArrow(row)
 
-			verCol := ""
-			if anyInstall {
-				if pkg, ok := m.cfg.Packages[row.name]; ok && pkg.Install != nil && pkg.Install.Bin != "" {
-					checked := m.versionChecked[row.name]
-					ver := m.versions[row.name]
-					switch {
-					case !checked:
-						verCol = "  " + styleDim.Render("...")
-					case ver == "":
-						verCol = "  " + styleDim.Render("not installed")
-					default:
-						verCol = "  " + styleDim.Render(ver)
-					}
+			var verText string
+			if _, ok := m.cfg.Packages[row.name]; ok {
+				checked := m.versionChecked[row.name]
+				ver := m.versions[row.name]
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
 				}
 			}
+			verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
 
-			fmt.Fprintf(&b, "%s  %s  [%s]%s%s\n", cursor, name, row.status.label(), verCol, pending)
+			fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n", cursor, name, verCol, row.status.label(), pending)
 		}
 
 		below := len(m.rows) - end
@@ -337,7 +334,7 @@ func (m model) viewList() string {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
 
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · i install · b branch · r pull · e edit · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [a]pply · [i]nstall · [b]ranch · [p]ull · [e]dit · [q]uit"))
 
 	return b.String()
 }
@@ -365,6 +362,16 @@ func (m model) viewTags() string {
 			}
 		}
 
+		verWidth := len("not installed")
+		for _, tr := range m.tagRows {
+			for _, pkg := range tr.pkgs {
+				if ver := m.versions[pkg.name]; len(ver) > verWidth {
+					verWidth = len(ver)
+				}
+			}
+		}
+		verPad := strings.Repeat(" ", verWidth+2)
+
 		vh := m.tagVisibleHeight()
 		end := m.tagOffset + vh
 		if end > len(items) {
@@ -391,10 +398,10 @@ func (m model) viewTags() string {
 				}
 				pendingMark := m.tagPendingArrow(item.tag)
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
-				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
+				fmt.Fprintf(&b, "%s%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
 					styleCyan.Render(styleBold.Render(name)),
-					item.tag.status.label(), pendingMark)
+					verPad, item.tag.status.label(), pendingMark)
 			} else {
 				connector := "├── "
 				if item.isLastChild {
@@ -402,10 +409,24 @@ func (m model) viewTags() string {
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
 				pendingMark := m.pkgPendingArrow(*item.pkg)
-				fmt.Fprintf(&b, "%s  %s  [%s]%s\n",
+
+				checked := m.versionChecked[item.pkg.name]
+				ver := m.versions[item.pkg.name]
+				var verText string
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
+				}
+				verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
+
+				fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
-					item.pkg.status.label(), pendingMark)
+					verCol, item.pkg.status.label(), pendingMark)
 			}
 		}
 
@@ -425,7 +446,7 @@ func (m model) viewTags() string {
 	} else {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · r pull · [ ] tabs · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [enter]collapse · [a]pply · [p]ull · [/]tabs · [q]uit"))
 	return b.String()
 }
 
