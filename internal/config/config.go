@@ -21,11 +21,22 @@ type Package struct {
 	Ignore    []string   `yaml:"ignore,omitempty"`
 	Condition *Condition `yaml:"condition,omitempty"`
 	Tags      []string   `yaml:"tags,omitempty"`
+	Install   *Install   `yaml:"install,omitempty"`
 }
 
 // Condition gates a package on runtime attributes.
 type Condition struct {
 	OS string `yaml:"os"`
+}
+
+// Install holds optional application installation metadata for a package.
+type Install struct {
+	Bin    string   `yaml:"bin,omitempty"`
+	Brew   string   `yaml:"brew,omitempty"`
+	Apt    string   `yaml:"apt,omitempty"`
+	Dnf    string   `yaml:"dnf,omitempty"`
+	Script string   `yaml:"script,omitempty"`
+	Deps   []string `yaml:"deps,omitempty"`
 }
 
 // Load reads and parses a Knotfile at the given path.

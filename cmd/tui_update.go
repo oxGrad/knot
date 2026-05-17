@@ -2,16 +2,28 @@ package cmd
 
 import (
 	"fmt"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/oxgrad/knot/internal/config"
 )
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		fetchGitInfoCmd(dotfilesDir(m.cfgPath)),
 		headerTickCmd(),
-	)
+	}
+	for _, row := range m.rows {
+		if pkg, ok := m.cfg.Packages[row.name]; ok {
+			bin := row.name
+			if pkg.Install != nil && pkg.Install.Bin != "" {
+				bin = pkg.Install.Bin
+			}
+			cmds = append(cmds, checkVersionCmd(row.name, bin))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -36,6 +48,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case versionCheckMsg:
+		if m.versionChecked == nil {
+			m.versionChecked = make(map[string]bool)
+		}
+		if m.versions == nil {
+			m.versions = make(map[string]string)
+		}
+		m.versionChecked[msg.pkgName] = true
+		if msg.found {
+			m.versions[msg.pkgName] = msg.version
+		}
+		return m, nil
+
+	case installDoneMsg:
+		m.installPkg = ""
+		m.installMgrs = nil
+		m.installAvail = nil
+		m.installCursor = 0
+		m.installOffset = 0
+		if msg.err != nil {
+			m.phase = phaseResult
+			m.applyLog = []string{fmt.Sprintf("install %s: %v", msg.pkgName, msg.err)}
+			m.applyErr = msg.err
+			return m, nil
+		}
+		m.phase = phaseList
+		var cmd tea.Cmd
+		if pkg, ok := m.cfg.Packages[msg.pkgName]; ok {
+			bin := msg.pkgName
+			if pkg.Install != nil && pkg.Install.Bin != "" {
+				bin = pkg.Install.Bin
+			}
+			delete(m.versions, msg.pkgName)
+			m.versionChecked[msg.pkgName] = false
+			cmd = checkVersionCmd(msg.pkgName, bin)
+		}
+		return m, cmd
+
 	case tea.KeyMsg:
 		switch m.phase {
 		case phaseList:
@@ -47,6 +97,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirm(msg)
 		case phaseBranch:
 			return m.updateBranch(msg)
+		case phaseInstallSelect:
+			return m.updateInstallSelect(msg)
 		case phaseResult:
 			m.phase = phaseList
 			m.applyLog = nil
@@ -105,6 +157,27 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.adjustOffset()
 		m.adjustTagOffset()
 		m.phase = phaseList
+
+		// Re-fire version checks after reload (config may have changed).
+		var vCmds []tea.Cmd
+		for k := range m.versionChecked {
+			delete(m.versionChecked, k)
+		}
+		for k := range m.versions {
+			delete(m.versions, k)
+		}
+		for _, row := range m.rows {
+			if pkg, ok := m.cfg.Packages[row.name]; ok {
+				bin := row.name
+				if pkg.Install != nil && pkg.Install.Bin != "" {
+					bin = pkg.Install.Bin
+				}
+				vCmds = append(vCmds, checkVersionCmd(row.name, bin))
+			}
+		}
+		if len(vCmds) > 0 {
+			return m, tea.Batch(vCmds...)
+		}
 		return m, nil
 
 	case applyDoneMsg:
@@ -174,11 +247,27 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.confirmLines = m.buildConfirmLines()
 		m.phase = phaseConfirm
-	case "r":
+	case "p":
 		m.phase = phaseGitPull
 		return m, gitPullCmd(m.cfgPath)
 	case "b":
 		return m, fetchBranchesCmd(dotfilesDir(m.cfgPath))
+	case "i":
+		if m.cursor < len(m.rows) {
+			row := m.rows[m.cursor]
+			pkg := m.cfg.Packages[row.name]
+			if pkg.Install != nil {
+				mgrs, avail := detectAvailableManagers(pkg.Install)
+				if len(mgrs) > 0 {
+					m.installPkg = row.name
+					m.installMgrs = mgrs
+					m.installAvail = avail
+					m.installCursor = 0
+					m.installOffset = 0
+					m.phase = phaseInstallSelect
+				}
+			}
+		}
 	case "e":
 		return m, editorCmd(m.cfgPath)
 	case "]":
@@ -276,7 +365,7 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.activeTab = tabPackages
 	case "m":
 		m.mascotChar = (m.mascotChar + 1) % 3
-	case "r":
+	case "p":
 		m.phase = phaseGitPull
 		return m, gitPullCmd(m.cfgPath)
 	case "q", "ctrl+c":
@@ -298,4 +387,61 @@ func (m model) buildConfirmLines() []string {
 		}
 	}
 	return lines
+}
+
+func (m model) updateInstallSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.installCursor > 0 {
+			m.installCursor--
+		}
+	case "down", "j":
+		if m.installCursor < len(m.installMgrs)-1 {
+			m.installCursor++
+		}
+	case "enter":
+		if m.installCursor < len(m.installMgrs) {
+			kind := m.installMgrs[m.installCursor]
+			pkg := m.cfg.Packages[m.installPkg]
+			return m, m.buildInstallSequence(kind, pkg.Install)
+		}
+	case "esc", "q":
+		m.phase = phaseList
+		m.installPkg = ""
+		m.installMgrs = nil
+		m.installAvail = nil
+		m.installCursor = 0
+		m.installOffset = 0
+	case "ctrl+c":
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// buildInstallSequence installs all deps followed by the package itself, using the given manager.
+// All commands are chained as a single sh -c "..." to preserve interactive terminal takeover.
+func (m model) buildInstallSequence(kind pkgManagerKind, install *config.Install) tea.Cmd {
+	var parts []string
+
+	for _, depName := range install.Deps {
+		depPkg, ok := m.cfg.Packages[depName]
+		if !ok || depPkg.Install == nil {
+			continue
+		}
+		if c := buildInstallCommand(kind, depPkg.Install); c != nil {
+			parts = append(parts, strings.Join(c.Args, " "))
+		}
+	}
+
+	if c := buildInstallCommand(kind, install); c != nil {
+		parts = append(parts, strings.Join(c.Args, " "))
+	}
+
+	if len(parts) == 0 {
+		return func() tea.Msg { return installDoneMsg{pkgName: m.installPkg} }
+	}
+
+	script := strings.Join(parts, " && ")
+	shellCmd := exec.Command("sh", "-c", script)
+	return installCmd(m.installPkg, shellCmd)
 }
