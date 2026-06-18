@@ -19,6 +19,8 @@ Knot is a CLI tool for managing dotfiles via symlinks. Like GNU Stow, it central
 - **Safe by Default:** `knot plan` previews every change before anything is written
 - **Validation:** `knot validate` checks your Knotfile for errors before you run anything
 - **Interactive TUI:** Run `knot` with no arguments for a live package/tags dashboard
+- **App Install:** Declare `install` metadata per package to check versions and install apps from the TUI
+- **File Templating:** `.tmpl` files are rendered with Go `text/template` using runtime variables like `.os`, `.hostname`, `.home`
 
 ## 🚀 Installation
 
@@ -62,6 +64,11 @@ packages:
     ignore:
       - "README.md"
       - ".DS_Store"
+    install:
+      bin: nvim
+      brew: neovim
+      apt: neovim
+      dnf: neovim
 
   # Map zsh files directly into the home directory
   zsh:
@@ -89,6 +96,12 @@ packages:
 | `ignore` | — | List of glob patterns matched against file basenames |
 | `tags` | — | List of tag names; enables `--tag` flag and Tags tab in TUI |
 | `condition.os` | — | Only tie on this OS (`darwin`, `linux`, `windows`, `freebsd`) |
+| `install.bin` | — | Binary name to check with `which` and `--version` (e.g. `nvim`) |
+| `install.brew` | — | Homebrew formula name |
+| `install.apt` | — | apt-get package name |
+| `install.dnf` | — | dnf package name |
+| `install.script` | — | URL for a curl install script, piped to bash |
+| `install.deps` | — | Other knot package names to install first (same package manager) |
 
 ### Linking modes
 
@@ -110,6 +123,31 @@ zsh:
     - "README.md"
 ```
 
+### File templating
+
+In per-file mode, any source file ending with `.tmpl` is rendered with Go `text/template` before being linked. The `.tmpl` suffix is stripped in the target name (e.g. `config.tmpl` → `config`).
+
+Available template variables:
+
+| Variable | Description |
+|---|---|
+| `.os` | Runtime OS (`darwin`, `linux`, `windows`, …) |
+| `.arch` | CPU architecture (`amd64`, `arm64`, …) |
+| `.hostname` | Machine hostname |
+| `.username` | Current user name |
+| `.home` | Home directory path |
+| `.env` | Map of all environment variables |
+
+Example — write a config that adapts to the current OS:
+
+```
+# zsh/.zshrc.tmpl
+{{ if eq .os "darwin" }}
+eval "$(/opt/homebrew/bin/brew shellenv)"
+{{ end }}
+export PATH="$HOME/.local/bin:$PATH"
+```
+
 A [JSON Schema](schema/knotfile.schema.json) is available for editor validation and auto-complete — see [Editor Integration](#editor-integration).
 
 ## 🛠️ CLI Reference
@@ -120,6 +158,8 @@ knot untie [package...] [--all] [--tag <name>]  Remove symlinks
 knot status                                       Show symlink state
 knot plan [package...] [--all] [--tag <name>]   Dry-run preview
 knot validate                                     Validate Knotfile
+knot init [git-url]                               Create or clone a Knotfile
+knot version                                      Print the knot version
 ```
 
 Global flags available on every command:
@@ -171,6 +211,19 @@ Dry-run that shows exactly what `tie` would do:
 Plan: 1 to create, 0 to remove, 1 already linked, 0 conflicts
 ```
 
+### `knot init`
+
+Creates a starter `Knotfile` in the current directory, or clones an existing dotfiles repository:
+
+```bash
+knot init              # scaffold a Knotfile in the current directory
+knot init <git-url>   # clone a dotfiles repo and set it up
+```
+
+### `knot version`
+
+Prints the current knot version and exits.
+
 ### `knot validate`
 
 Validates the Knotfile without touching the filesystem:
@@ -201,9 +254,11 @@ Key bindings:
 | `enter` | Collapse/expand tag (Tags tab) |
 | `[` / `]` | Switch tabs |
 | `a` | Apply pending changes |
+| `i` | Install selected package (Packages tab) |
 | `r` | `git pull` and reload |
 | `b` | Switch branch |
 | `e` | Open dotfiles dir in `$EDITOR` |
+| `m` | Cycle mascot character |
 | `q` | Quit |
 
 ## 🖥️ Editor Integration

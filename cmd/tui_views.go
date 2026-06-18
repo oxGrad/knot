@@ -240,6 +240,8 @@ func (m model) View() string {
 		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
 		v = m.viewBranch()
+	case phaseInstallSelect:
+		v = m.viewInstallSelect()
 	default:
 		if m.activeTab == tabTags {
 			v = m.viewTags()
@@ -266,6 +268,13 @@ func (m model) viewList() string {
 			}
 		}
 
+		verWidth := len("not installed")
+		for _, r := range m.rows {
+			if ver := m.versions[r.name]; len(ver) > verWidth {
+				verWidth = len(ver)
+			}
+		}
+
 		visibleRows := m.visibleHeight()
 		end := m.offset + visibleRows
 		if end > len(m.rows) {
@@ -288,7 +297,23 @@ func (m model) viewList() string {
 
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 			pending := m.pkgPendingArrow(row)
-			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
+
+			var verText string
+			if _, ok := m.cfg.Packages[row.name]; ok {
+				checked := m.versionChecked[row.name]
+				ver := m.versions[row.name]
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
+				}
+			}
+			verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
+
+			fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n", cursor, name, verCol, row.status.label(), pending)
 		}
 
 		below := len(m.rows) - end
@@ -309,7 +334,7 @@ func (m model) viewList() string {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
 
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · b branch · r pull · e edit · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [a]pply · [i]nstall · [b]ranch · [p]ull · [e]dit · [q]uit"))
 
 	return b.String()
 }
@@ -337,6 +362,16 @@ func (m model) viewTags() string {
 			}
 		}
 
+		verWidth := len("not installed")
+		for _, tr := range m.tagRows {
+			for _, pkg := range tr.pkgs {
+				if ver := m.versions[pkg.name]; len(ver) > verWidth {
+					verWidth = len(ver)
+				}
+			}
+		}
+		verPad := strings.Repeat(" ", verWidth+2)
+
 		vh := m.tagVisibleHeight()
 		end := m.tagOffset + vh
 		if end > len(items) {
@@ -363,10 +398,10 @@ func (m model) viewTags() string {
 				}
 				pendingMark := m.tagPendingArrow(item.tag)
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
-				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
+				fmt.Fprintf(&b, "%s%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
 					styleCyan.Render(styleBold.Render(name)),
-					item.tag.status.label(), pendingMark)
+					verPad, item.tag.status.label(), pendingMark)
 			} else {
 				connector := "├── "
 				if item.isLastChild {
@@ -374,10 +409,24 @@ func (m model) viewTags() string {
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
 				pendingMark := m.pkgPendingArrow(*item.pkg)
-				fmt.Fprintf(&b, "%s  %s  [%s]%s\n",
+
+				checked := m.versionChecked[item.pkg.name]
+				ver := m.versions[item.pkg.name]
+				var verText string
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
+				}
+				verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
+
+				fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
-					item.pkg.status.label(), pendingMark)
+					verCol, item.pkg.status.label(), pendingMark)
 			}
 		}
 
@@ -397,7 +446,7 @@ func (m model) viewTags() string {
 	} else {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · r pull · [ ] tabs · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [enter]collapse · [a]pply · [p]ull · [/]tabs · [q]uit"))
 	return b.String()
 }
 
@@ -475,5 +524,46 @@ func (m model) viewResult() string {
 	}
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render("Press any key to return."))
+	return b.String()
+}
+
+func (m model) viewInstallSelect() string {
+	var b strings.Builder
+
+	pkg := m.cfg.Packages[m.installPkg]
+
+	title := styleBold.Render("Install ") + m.installPkg
+	b.WriteString(title + "\n")
+	b.WriteString(strings.Repeat("─", max(m.width-tuiMarginLeft-tuiMarginRight, 30)) + "\n")
+
+	if pkg.Install != nil && len(pkg.Install.Deps) > 0 {
+		b.WriteString("\n  " + styleDim.Render("Dependencies: ") + strings.Join(pkg.Install.Deps, ", ") + "\n")
+	}
+	b.WriteString("\n")
+
+	for i, kind := range m.installMgrs {
+		cursor := "  "
+		if i == m.installCursor {
+			cursor = styleCursor.Render("▶ ")
+		}
+
+		label := fmt.Sprintf("%-5s", kind.label())
+		cmdStr := renderInstallCommandPreview(kind, pkg.Install)
+
+		suffix := ""
+		if !m.installAvail[kind] {
+			suffix = "  " + styleDim.Render("(not available)")
+		}
+
+		fmt.Fprintf(&b, "%s%s  %s%s\n",
+			cursor,
+			styleDim.Render(label),
+			cmdStr,
+			suffix,
+		)
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styleDim.Render("↑↓/jk navigate · enter install · esc cancel"))
 	return b.String()
 }

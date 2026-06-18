@@ -50,6 +50,45 @@
         },
         "condition": {
           "$ref": "#/definitions/condition"
+        },
+        "install": {
+          "$ref": "#/definitions/install"
+        }
+      }
+    },
+    "install": {
+      "type": "object",
+      "description": "Optional application installation metadata. Enables version checking and in-TUI installation.",
+      "additionalProperties": false,
+      "properties": {
+        "bin": {
+          "type": "string",
+          "description": "Binary name to check with 'which' and '--version' (e.g. 'nvim', 'git')."
+        },
+        "brew": {
+          "type": "string",
+          "description": "Homebrew formula name (e.g. 'neovim')."
+        },
+        "apt": {
+          "type": "string",
+          "description": "apt-get package name (e.g. 'neovim')."
+        },
+        "dnf": {
+          "type": "string",
+          "description": "dnf package name (e.g. 'neovim')."
+        },
+        "script": {
+          "type": "string",
+          "description": "URL for a curl install script, piped to bash."
+        },
+        "deps": {
+          "type": "array",
+          "description": "Other knot package names to install first (same package manager).",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
         }
       }
     },

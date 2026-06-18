@@ -57,13 +57,16 @@ func runTUI(cmd *cobra.Command, args []string) error {
 	}
 
 	m := model{
-		cfg:     cfg,
-		cfgPath: cfgPath,
-		lnk:     lnk,
-		rows:    rows,
-		toggles: seedToggles(rows),
-		tagRows: buildTagRows(cfg, rows),
-		phase:   phaseList,
+		cfg:            cfg,
+		cfgPath:        cfgPath,
+		lnk:            lnk,
+		rows:           rows,
+		toggles:        seedToggles(rows),
+		tagRows:        buildTagRows(cfg, rows),
+		phase:          phaseList,
+		versions:       make(map[string]string),
+		versionChecked: make(map[string]bool),
+		installAvail:   make(map[pkgManagerKind]bool),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
