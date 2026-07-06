@@ -66,7 +66,6 @@ func runTUI(cmd *cobra.Command, args []string) error {
 		phase:          phaseList,
 		versions:       make(map[string]string),
 		versionChecked: make(map[string]bool),
-		installAvail:   make(map[pkgManagerKind]bool),
 	}
 
 	p := tea.NewProgram(m, tea.WithAltScreen())

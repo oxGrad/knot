@@ -64,7 +64,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installDoneMsg:
 		m.installPkg = ""
 		m.installMgrs = nil
-		m.installAvail = nil
 		m.installCursor = 0
 		m.installOffset = 0
 		if msg.err != nil {
@@ -99,6 +98,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateBranch(msg)
 		case phaseInstallSelect:
 			return m.updateInstallSelect(msg)
+		case phaseInstallConfirm:
+			return m.updateInstallConfirm(msg)
 		case phaseResult:
 			m.phase = phaseList
 			m.applyLog = nil
@@ -254,19 +255,7 @@ func (m model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, fetchBranchesCmd(dotfilesDir(m.cfgPath))
 	case "i":
 		if m.cursor < len(m.rows) {
-			row := m.rows[m.cursor]
-			pkg := m.cfg.Packages[row.name]
-			if pkg.Install != nil {
-				mgrs, avail := detectAvailableManagers(pkg.Install)
-				if len(mgrs) > 0 {
-					m.installPkg = row.name
-					m.installMgrs = mgrs
-					m.installAvail = avail
-					m.installCursor = 0
-					m.installOffset = 0
-					m.phase = phaseInstallSelect
-				}
-			}
+			m = m.tryInstall(m.rows[m.cursor].name)
 		}
 	case "e":
 		return m, editorCmd(m.cfgPath)
@@ -355,6 +344,13 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.adjustTagOffset()
 			}
 		}
+	case "i":
+		if m.tagCursor < len(items) {
+			item := items[m.tagCursor]
+			if !item.isTag {
+				m = m.tryInstall(item.pkg.name)
+			}
+		}
 	case "a":
 		if m.pendingCount() == 0 {
 			break
@@ -372,6 +368,47 @@ func (m model) updateTags(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+// tryInstall routes to phaseInstallConfirm if pkgName already shows an
+// installed version, otherwise starts the install picker directly.
+func (m model) tryInstall(pkgName string) model {
+	if m.versionChecked[pkgName] && m.versions[pkgName] != "" {
+		m.installPkg = pkgName
+		m.phase = phaseInstallConfirm
+		return m
+	}
+	return m.startInstall(pkgName)
+}
+
+func (m model) updateInstallConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		m = m.startInstall(m.installPkg)
+	case "n", "esc", "q":
+		m.installPkg = ""
+		m.phase = phaseList
+	}
+	return m, nil
+}
+
+// startInstall enters phaseInstallSelect for pkgName if it has install
+// metadata and at least one manager usable on this machine.
+func (m model) startInstall(pkgName string) model {
+	pkg, ok := m.cfg.Packages[pkgName]
+	if !ok || pkg.Install == nil {
+		return m
+	}
+	mgrs := detectAvailableManagers(pkg.Install)
+	if len(mgrs) == 0 {
+		return m
+	}
+	m.installPkg = pkgName
+	m.installMgrs = mgrs
+	m.installCursor = 0
+	m.installOffset = 0
+	m.phase = phaseInstallSelect
+	return m
 }
 
 func (m model) buildConfirmLines() []string {
@@ -409,7 +446,6 @@ func (m model) updateInstallSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.phase = phaseList
 		m.installPkg = ""
 		m.installMgrs = nil
-		m.installAvail = nil
 		m.installCursor = 0
 		m.installOffset = 0
 	case "ctrl+c":

@@ -96,12 +96,72 @@ packages:
 | `ignore` | — | List of glob patterns matched against file basenames |
 | `tags` | — | List of tag names; enables `--tag` flag and Tags tab in TUI |
 | `condition.os` | — | Only tie on this OS (`darwin`, `linux`, `windows`, `freebsd`) |
-| `install.bin` | — | Binary name to check with `which` and `--version` (e.g. `nvim`) |
+| `install` | — | Optional app-install metadata — see App Install below |
+
+### 📥 App Install (`install:`)
+
+Adding an `install:` block to a package enables version checking and, in the
+TUI, an `i` key that installs the app itself.
+
+```yaml
+packages:
+  nvim:
+    target: ~/.config/nvim
+    install:
+      bin: nvim
+      deps: [git]
+
+  secrets:
+    target: ~/.ssh
+    install:
+      bin: age
+      script: curl -fsSL https://age-encryption.org/install.sh | sh
+      autoResolve: false
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `install.bin` | — | Binary name checked with `which` and `--version` to detect an existing install (e.g. `nvim`) |
 | `install.brew` | — | Homebrew formula name |
 | `install.apt` | — | apt-get package name |
 | `install.dnf` | — | dnf package name |
 | `install.script` | — | URL for a curl install script, piped to bash |
-| `install.deps` | — | Other knot package names to install first (same package manager) |
+| `install.deps` | — | Other knot package names to install first, via the same package manager |
+| `install.autoResolve` | — | Fill empty `brew`/`apt`/`dnf` with the package name. Defaults to `true` |
+
+**`bin`** — the binary knot looks for on `$PATH` to decide whether the
+package is already installed, and to read its version for the Packages tab.
+If omitted, it falls back to the package's Knotfile name.
+
+**`brew` / `apt` / `dnf`** — the package name passed to each manager's
+install command. Leave these unset and let `autoResolve` fill them in when
+the name matches the package's Knotfile key (the common case); set one
+explicitly when a manager's package name differs (e.g. `apt: neovim` where
+the Knotfile package is named `nvim`).
+
+| Manager | Binary checked | OS |
+|---|---|---|
+| `brew` | `brew` | macOS, Linux (Homebrew on Linux) |
+| `apt` | `apt-get` | Linux (Debian/Ubuntu) |
+| `dnf` | `dnf` | Linux (Fedora/RHEL) |
+
+Pressing `i` in the TUI only lists managers configured on the package **and**
+present on `$PATH` — e.g. on Fedora, `apt` never shows up even if
+`install.apt` resolves to a name, since `apt-get` isn't installed.
+
+**`script`** — a shell one-liner (typically a `curl | sh`) run when there's
+no package-manager entry to use, or as an option alongside them. Checked
+against `curl` on `$PATH`.
+
+**`deps`** — other package names (from this same Knotfile) to install first,
+using the same manager the user picks for this package. Useful when an app
+needs a build dependency (e.g. `tmux` depending on `deps: [git]`).
+
+**`autoResolve`** — when `true` (the default), any of `brew`/`apt`/`dnf` left
+empty are filled in with the package's Knotfile name, so a package whose name
+matches across all three managers needs no repetition. Set it to `false` to
+opt a package out entirely — e.g. a `script`-only install like `secrets`
+above, where "secrets" isn't a real package in any manager.
 
 ### Linking modes
 

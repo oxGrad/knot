@@ -89,6 +89,11 @@
             "minLength": 1
           },
           "uniqueItems": true
+        },
+        "autoResolve": {
+          "type": "boolean",
+          "default": true,
+          "description": "Fill any of brew/apt/dnf left empty with the package's Knotfile name. Set to false to require each manager field explicitly."
         }
       }
     },

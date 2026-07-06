@@ -11,7 +11,7 @@ import (
 type pkgManagerKind int
 
 const (
-	pkgMgrBrew   pkgManagerKind = iota
+	pkgMgrBrew pkgManagerKind = iota
 	pkgMgrApt
 	pkgMgrDnf
 	pkgMgrScript
@@ -103,7 +103,7 @@ const statusWidth = 9
 type mascotState int
 
 const (
-	mascotNormal   mascotState = iota
+	mascotNormal mascotState = iota
 	mascotConflict
 	mascotMissing
 )
@@ -111,7 +111,7 @@ const (
 type mascotCharacter int
 
 const (
-	mascotRobot     mascotCharacter = iota
+	mascotRobot mascotCharacter = iota
 	mascotJellyfish
 	mascotMonkey
 )
@@ -159,6 +159,7 @@ const (
 	phaseBranch
 	phaseCheckout
 	phaseInstallSelect
+	phaseInstallConfirm
 )
 
 // ── model ─────────────────────────────────────────────────────────────────────
@@ -197,13 +198,12 @@ type model struct {
 	mascotChar    mascotCharacter
 
 	// version checking
-	versions       map[string]string      // pkgName -> version string (only set when found)
-	versionChecked map[string]bool        // pkgName -> true once async check completed
+	versions       map[string]string // pkgName -> version string (only set when found)
+	versionChecked map[string]bool   // pkgName -> true once async check completed
 
 	// install flow
-	installPkg    string                 // package being installed
-	installMgrs   []pkgManagerKind       // configured managers for installPkg
-	installAvail  map[pkgManagerKind]bool // whether each mgr binary is in PATH
+	installPkg    string           // package being installed
+	installMgrs   []pkgManagerKind // managers for installPkg usable on this machine
 	installCursor int
 	installOffset int
 }

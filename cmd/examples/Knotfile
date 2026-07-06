@@ -10,7 +10,9 @@
 packages:
 
   # source defaults to ./nvim when omitted
-  # install: lets `knot install nvim` bootstrap the binary itself
+  # install: lets `i` in the TUI bootstrap the binary itself. brew/apt/dnf
+  # names aren't listed here — autoResolve (default true) fills them in with
+  # the package name below (nvim), since that matches all three managers.
   nvim:
     target: ~/.config/nvim
     tags: [work]
@@ -19,18 +21,12 @@ packages:
       - ".DS_Store"
     install:
       bin: nvim                     # binary checked to detect an existing install
-      brew: neovim
-      apt: neovim
-      dnf: neovim
 
   tmux:
     target: ~/.config/tmux
     tags: [work]
     install:
       bin: tmux
-      brew: tmux
-      apt: tmux
-      dnf: tmux
       deps: [git]                   # installed first via the same package manager
 
   # Zsh configuration — explicit source, tagged home
@@ -56,9 +52,11 @@ packages:
       os: linux
 
   # untagged — still usable by name: knot tie secrets
-  # install.script runs when there's no package-manager entry to use
+  # install.script runs when there's no package-manager entry to use;
+  # autoResolve: false stops brew/apt/dnf being auto-filled with "secrets"
   secrets:
     target: ~/.ssh
     install:
       bin: age
       script: curl -fsSL https://age-encryption.org/install.sh | sh
+      autoResolve: false

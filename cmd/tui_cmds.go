@@ -188,23 +188,24 @@ func buildInstallCommand(kind pkgManagerKind, install *config.Install) *exec.Cmd
 	return nil
 }
 
-// detectAvailableManagers returns the configured managers and a map indicating PATH availability.
-func detectAvailableManagers(install *config.Install) ([]pkgManagerKind, map[pkgManagerKind]bool) {
+// detectAvailableManagers returns the managers configured on the package that
+// are also usable on this machine (their CLI is on PATH). Managers whose
+// binary isn't installed (e.g. apt on Fedora) are left out entirely.
+func detectAvailableManagers(install *config.Install) []pkgManagerKind {
 	var mgrs []pkgManagerKind
-	avail := make(map[pkgManagerKind]bool)
 	check := func(kind pkgManagerKind, field string) {
 		if field == "" {
 			return
 		}
-		mgrs = append(mgrs, kind)
-		_, err := exec.LookPath(kind.binary())
-		avail[kind] = (err == nil)
+		if _, err := exec.LookPath(kind.binary()); err == nil {
+			mgrs = append(mgrs, kind)
+		}
 	}
 	check(pkgMgrBrew, install.Brew)
 	check(pkgMgrApt, install.Apt)
 	check(pkgMgrDnf, install.Dnf)
 	check(pkgMgrScript, install.Script)
-	return mgrs, avail
+	return mgrs
 }
 
 // renderInstallCommandPreview returns the command string shown in the install selection UI.

@@ -243,6 +243,8 @@ func (m model) View() string {
 		v = m.viewBranch()
 	case phaseInstallSelect:
 		v = m.viewInstallSelect()
+	case phaseInstallConfirm:
+		v = m.viewInstallConfirm()
 	default:
 		if m.activeTab == tabTags {
 			v = m.viewTags()
@@ -447,7 +449,7 @@ func (m model) viewTags() string {
 	} else {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
-	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [enter]collapse · [a]pply · [p]ull · [/]tabs · [q]uit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [enter]collapse · [a]pply · [i]nstall · [p]ull · [/]tabs · [q]uit"))
 	return b.String()
 }
 
@@ -536,6 +538,13 @@ var styleModalBox = lipgloss.NewStyle().
 	Align(lipgloss.Center).
 	Padding(1, 3)
 
+// styleModalBoxLeft is styleModalBox without centering, for modals whose
+// content is a left-aligned list rather than short centered text.
+var styleModalBoxLeft = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#c084fc")).
+	Padding(1, 3)
+
 func (m model) viewConfirm() string {
 	var b strings.Builder
 	b.WriteString(styleBold.Render("Confirm apply") + "\n\n")
@@ -544,8 +553,7 @@ func (m model) viewConfirm() string {
 	b.WriteString(styleBold.Render("Apply? [y/n]"))
 
 	box := styleModalBox.Width(modalMinWidth).Render(b.String())
-	bg := styleDim.Render(ansi.Strip(m.backgroundView()))
-	return overlayTop(bg, box, m.width-tuiMarginLeft-tuiMarginRight, m.height, m.listHeaderLines())
+	return m.renderModal(box)
 }
 
 // backgroundView renders whatever list/tab view sits behind a modal.
@@ -554,6 +562,13 @@ func (m model) backgroundView() string {
 		return m.viewTags()
 	}
 	return m.viewList()
+}
+
+// renderModal composites box (already bordered/styled) on top of the dimmed
+// background view, anchored near the top of the content area.
+func (m model) renderModal(box string) string {
+	bg := styleDim.Render(ansi.Strip(m.backgroundView()))
+	return overlayTop(bg, box, m.width-tuiMarginLeft-tuiMarginRight, m.height, m.listHeaderLines())
 }
 
 // overlayTop composites fg as a box on top of bg, ANSI-safe, horizontally
@@ -609,19 +624,28 @@ func (m model) viewResult() string {
 	return b.String()
 }
 
+func (m model) viewInstallConfirm() string {
+	var b strings.Builder
+	version := m.versions[m.installPkg]
+
+	b.WriteString(styleBold.Render("Already installed") + "\n\n")
+	b.WriteString(styleCyan.Render(fmt.Sprintf("%s %s is already installed.", m.installPkg, version)) + "\n\n")
+	b.WriteString(styleBold.Render("Reinstall? [y/n]"))
+
+	box := styleModalBox.Width(modalMinWidth).Render(b.String())
+	return m.renderModal(box)
+}
+
 func (m model) viewInstallSelect() string {
 	var b strings.Builder
 
 	pkg := m.cfg.Packages[m.installPkg]
 
-	title := styleBold.Render("Install ") + m.installPkg
-	b.WriteString(title + "\n")
-	b.WriteString(strings.Repeat("─", max(m.width-tuiMarginLeft-tuiMarginRight, 30)) + "\n")
+	b.WriteString(styleBold.Render("Install "+m.installPkg) + "\n\n")
 
 	if pkg.Install != nil && len(pkg.Install.Deps) > 0 {
-		b.WriteString("\n  " + styleDim.Render("Dependencies: ") + strings.Join(pkg.Install.Deps, ", ") + "\n")
+		b.WriteString(styleDim.Render("Dependencies: ") + strings.Join(pkg.Install.Deps, ", ") + "\n\n")
 	}
-	b.WriteString("\n")
 
 	for i, kind := range m.installMgrs {
 		cursor := "  "
@@ -632,20 +656,16 @@ func (m model) viewInstallSelect() string {
 		label := fmt.Sprintf("%-5s", kind.label())
 		cmdStr := renderInstallCommandPreview(kind, pkg.Install)
 
-		suffix := ""
-		if !m.installAvail[kind] {
-			suffix = "  " + styleDim.Render("(not available)")
-		}
-
-		fmt.Fprintf(&b, "%s%s  %s%s\n",
+		fmt.Fprintf(&b, "%s%s  %s\n",
 			cursor,
 			styleDim.Render(label),
 			cmdStr,
-			suffix,
 		)
 	}
 
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render("↑↓/jk navigate · enter install · esc cancel"))
-	return b.String()
+
+	box := styleModalBoxLeft.Render(b.String())
+	return m.renderModal(box)
 }

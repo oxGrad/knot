@@ -38,6 +38,17 @@ type Install struct {
 	Dnf    string   `yaml:"dnf,omitempty"`
 	Script string   `yaml:"script,omitempty"`
 	Deps   []string `yaml:"deps,omitempty"`
+
+	// AutoResolve fills any of Brew/Apt/Dnf left empty with the Knotfile
+	// package name. Defaults to true; set to false to require each
+	// manager field to be listed explicitly.
+	AutoResolve *bool `yaml:"autoResolve,omitempty"`
+}
+
+// autoResolveEnabled reports whether empty manager fields should default to
+// the package name. Unset (nil) defaults to true.
+func (i *Install) autoResolveEnabled() bool {
+	return i.AutoResolve == nil || *i.AutoResolve
 }
 
 // loadOne reads and parses a single Knotfile at path, resolving source paths
@@ -64,6 +75,17 @@ func loadOne(path string) (*Config, error) {
 		}
 		if !filepath.IsAbs(pkg.Source) {
 			pkg.Source = filepath.Join(dir, pkg.Source)
+		}
+		if pkg.Install != nil && pkg.Install.autoResolveEnabled() {
+			if pkg.Install.Brew == "" {
+				pkg.Install.Brew = name
+			}
+			if pkg.Install.Apt == "" {
+				pkg.Install.Apt = name
+			}
+			if pkg.Install.Dnf == "" {
+				pkg.Install.Dnf = name
+			}
 		}
 		cfg.Packages[name] = pkg
 	}
