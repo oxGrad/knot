@@ -3,9 +3,11 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,6 +15,12 @@ import (
 	"github.com/oxgrad/knot/internal/config"
 	"github.com/oxgrad/knot/internal/linker"
 )
+
+var versionRe = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)*[a-zA-Z]?(?:[-+][a-zA-Z0-9.]+)*`)
+
+func extractVersion(output string) string {
+	return versionRe.FindString(output)
+}
 
 func dotfilesDir(cfgPath string) string {
 	return filepath.Dir(cfgPath)
@@ -125,6 +133,94 @@ func applyCmd(cfg *config.Config, lnk *linker.Linker, rows []pkgRow, toggles map
 
 		return applyDoneMsg{log: log, err: errors.Join(errs...)}
 	}
+}
+
+// checkVersionCmd checks if binName is in PATH and retrieves its version string.
+// It tries --version first, then falls back to the version subcommand (e.g. k9s).
+func checkVersionCmd(pkgName, binName string) tea.Cmd {
+	return func() tea.Msg {
+		path, err := exec.LookPath(binName)
+		if err != nil {
+			return versionCheckMsg{pkgName: pkgName, found: false}
+		}
+		for _, args := range [][]string{{"--version"}, {"-V"}, {"version"}} {
+			out, _ := exec.Command(path, args...).CombinedOutput()
+			if v := extractVersion(string(out)); v != "" {
+				return versionCheckMsg{pkgName: pkgName, found: true, version: v}
+			}
+		}
+		return versionCheckMsg{pkgName: pkgName, found: true, version: ""}
+	}
+}
+
+// installCmd wraps a pre-built exec.Cmd in tea.ExecProcess, returning installDoneMsg when done.
+func installCmd(pkgName string, c *exec.Cmd) tea.Cmd {
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		return installDoneMsg{pkgName: pkgName, err: err}
+	})
+}
+
+// buildInstallCommand constructs the OS command for the given manager and install config.
+// Returns nil if the relevant field is empty.
+func buildInstallCommand(kind pkgManagerKind, install *config.Install) *exec.Cmd {
+	switch kind {
+	case pkgMgrBrew:
+		if install.Brew == "" {
+			return nil
+		}
+		return exec.Command("brew", "install", install.Brew)
+	case pkgMgrApt:
+		if install.Apt == "" {
+			return nil
+		}
+		return exec.Command("sudo", "apt-get", "install", "-y", install.Apt)
+	case pkgMgrDnf:
+		if install.Dnf == "" {
+			return nil
+		}
+		return exec.Command("sudo", "dnf", "install", "-y", install.Dnf)
+	case pkgMgrScript:
+		if install.Script == "" {
+			return nil
+		}
+		return exec.Command("bash", "-c", fmt.Sprintf("curl -fsSL %s | bash", install.Script))
+	}
+	return nil
+}
+
+// detectAvailableManagers returns the managers configured on the package that
+// are also usable on this machine (their CLI is on PATH). Managers whose
+// binary isn't installed (e.g. apt on Fedora) are left out entirely.
+func detectAvailableManagers(install *config.Install) []pkgManagerKind {
+	var mgrs []pkgManagerKind
+	check := func(kind pkgManagerKind, field string) {
+		if field == "" {
+			return
+		}
+		if _, err := exec.LookPath(kind.binary()); err == nil {
+			mgrs = append(mgrs, kind)
+		}
+	}
+	check(pkgMgrBrew, install.Brew)
+	check(pkgMgrApt, install.Apt)
+	check(pkgMgrDnf, install.Dnf)
+	check(pkgMgrScript, install.Script)
+	return mgrs
+}
+
+// renderInstallCommandPreview returns the command string shown in the install selection UI.
+func renderInstallCommandPreview(kind pkgManagerKind, install *config.Install) string {
+	switch kind {
+	case pkgMgrBrew:
+		return "brew install " + install.Brew
+	case pkgMgrApt:
+		return "sudo apt-get install -y " + install.Apt
+	case pkgMgrDnf:
+		return "sudo dnf install -y " + install.Dnf
+	case pkgMgrScript:
+		return "curl -fsSL " + install.Script + " | bash"
+	}
+	return ""
 }
 
 func editorCmd(cfgPath string) tea.Cmd {

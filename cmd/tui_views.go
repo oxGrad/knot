@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ── layout helpers ────────────────────────────────────────────────────────────
@@ -240,6 +241,10 @@ func (m model) View() string {
 		v = styleDim.Render(fmt.Sprintf("Switching branch in %s...", dotfilesDir(m.cfgPath)))
 	case phaseBranch:
 		v = m.viewBranch()
+	case phaseInstallSelect:
+		v = m.viewInstallSelect()
+	case phaseInstallConfirm:
+		v = m.viewInstallConfirm()
 	default:
 		if m.activeTab == tabTags {
 			v = m.viewTags()
@@ -266,6 +271,13 @@ func (m model) viewList() string {
 			}
 		}
 
+		verWidth := len("not installed")
+		for _, r := range m.rows {
+			if ver := m.versions[r.name]; len(ver) > verWidth {
+				verWidth = len(ver)
+			}
+		}
+
 		visibleRows := m.visibleHeight()
 		end := m.offset + visibleRows
 		if end > len(m.rows) {
@@ -288,7 +300,23 @@ func (m model) viewList() string {
 
 			name := fmt.Sprintf("%-*s", nameWidth, row.name)
 			pending := m.pkgPendingArrow(row)
-			fmt.Fprintf(&b, "%s  %s  [%s]%s\n", cursor, name, row.status.label(), pending)
+
+			var verText string
+			if _, ok := m.cfg.Packages[row.name]; ok {
+				checked := m.versionChecked[row.name]
+				ver := m.versions[row.name]
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
+				}
+			}
+			verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
+
+			fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n", cursor, name, verCol, row.status.label(), pending)
 		}
 
 		below := len(m.rows) - end
@@ -309,7 +337,7 @@ func (m model) viewList() string {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
 
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · a apply · b branch · r pull · e edit · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [a]pply · [i]nstall · [b]ranch · [p]ull · [e]dit · [q]uit"))
 
 	return b.String()
 }
@@ -337,6 +365,16 @@ func (m model) viewTags() string {
 			}
 		}
 
+		verWidth := len("not installed")
+		for _, tr := range m.tagRows {
+			for _, pkg := range tr.pkgs {
+				if ver := m.versions[pkg.name]; len(ver) > verWidth {
+					verWidth = len(ver)
+				}
+			}
+		}
+		verPad := strings.Repeat(" ", verWidth+2)
+
 		vh := m.tagVisibleHeight()
 		end := m.tagOffset + vh
 		if end > len(items) {
@@ -363,10 +401,10 @@ func (m model) viewTags() string {
 				}
 				pendingMark := m.tagPendingArrow(item.tag)
 				name := fmt.Sprintf("%-*s", nameWidth, item.tag.name)
-				fmt.Fprintf(&b, "%s%s%s  [%s]%s\n",
+				fmt.Fprintf(&b, "%s%s%s%s  [%s]%s\n",
 					cursor, collapsePrefix,
 					styleCyan.Render(styleBold.Render(name)),
-					item.tag.status.label(), pendingMark)
+					verPad, item.tag.status.label(), pendingMark)
 			} else {
 				connector := "├── "
 				if item.isLastChild {
@@ -374,10 +412,24 @@ func (m model) viewTags() string {
 				}
 				pkgName := fmt.Sprintf("%-*s", nameWidth-7, item.pkg.name)
 				pendingMark := m.pkgPendingArrow(*item.pkg)
-				fmt.Fprintf(&b, "%s  %s  [%s]%s\n",
+
+				checked := m.versionChecked[item.pkg.name]
+				ver := m.versions[item.pkg.name]
+				var verText string
+				switch {
+				case !checked:
+					verText = "..."
+				case ver == "":
+					verText = "not installed"
+				default:
+					verText = ver
+				}
+				verCol := "  " + styleDim.Render(fmt.Sprintf("%-*s", verWidth, verText))
+
+				fmt.Fprintf(&b, "%s  %s%s  [%s]%s\n",
 					cursor,
 					styleDim.Render(connector+pkgName),
-					item.pkg.status.label(), pendingMark)
+					verCol, item.pkg.status.label(), pendingMark)
 			}
 		}
 
@@ -397,7 +449,7 @@ func (m model) viewTags() string {
 	} else {
 		b.WriteString(styleDim.Render("No pending changes") + "\n")
 	}
-	b.WriteString(styleDim.Render("↑↓/jk navigate · space toggle · enter collapse · a apply · r pull · [ ] tabs · q quit"))
+	b.WriteString(styleDim.Render("↑↓/jk · [space]toggle · [enter]collapse · [a]pply · [i]nstall · [p]ull · [/]tabs · [q]uit"))
 	return b.String()
 }
 
@@ -452,15 +504,109 @@ func (m model) viewBranch() string {
 	return b.String()
 }
 
+const modalMinWidth = 44
+
+// renderConfirmTable lays out confirmLines ("tie nvim" / "untie zsh") as an
+// invisible 2-column table: action right-aligned, package name left-aligned.
+func renderConfirmTable(lines []string) string {
+	actionWidth := len("untie")
+
+	type row struct{ action, name string }
+	rows := make([]row, 0, len(lines))
+	nameWidth := 0
+	for _, line := range lines {
+		action, name, ok := strings.Cut(line, " ")
+		if !ok {
+			action, name = "", line
+		}
+		rows = append(rows, row{action, name})
+		if len(name) > nameWidth {
+			nameWidth = len(name)
+		}
+	}
+
+	var b strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&b, "%s\n", styleCyan.Render(fmt.Sprintf("%*s  %-*s", actionWidth, r.action, nameWidth, r.name)))
+	}
+	return b.String()
+}
+
+var styleModalBox = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#c084fc")).
+	Align(lipgloss.Center).
+	Padding(1, 3)
+
+// styleModalBoxLeft is styleModalBox without centering, for modals whose
+// content is a left-aligned list rather than short centered text.
+var styleModalBoxLeft = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#c084fc")).
+	Padding(1, 3)
+
 func (m model) viewConfirm() string {
 	var b strings.Builder
-	b.WriteString(styleBold.Render("Pending changes:") + "\n")
-	for _, line := range m.confirmLines {
-		b.WriteString(styleCyan.Render(line) + "\n")
-	}
+	b.WriteString(styleBold.Render("Confirm apply") + "\n\n")
+	b.WriteString(renderConfirmTable(m.confirmLines))
 	b.WriteString("\n")
 	b.WriteString(styleBold.Render("Apply? [y/n]"))
-	return b.String()
+
+	box := styleModalBox.Width(modalMinWidth).Render(b.String())
+	return m.renderModal(box)
+}
+
+// backgroundView renders whatever list/tab view sits behind a modal.
+func (m model) backgroundView() string {
+	if m.activeTab == tabTags {
+		return m.viewTags()
+	}
+	return m.viewList()
+}
+
+// renderModal composites box (already bordered/styled) on top of the dimmed
+// background view, anchored near the top of the content area.
+func (m model) renderModal(box string) string {
+	bg := styleDim.Render(ansi.Strip(m.backgroundView()))
+	return overlayTop(bg, box, m.width-tuiMarginLeft-tuiMarginRight, m.height, m.listHeaderLines())
+}
+
+// overlayTop composites fg as a box on top of bg, ANSI-safe, horizontally
+// centered and anchored near the top of the region starting at regionTop.
+func overlayTop(bg, fg string, width, height, regionTop int) string {
+	bgLines := strings.Split(bg, "\n")
+	for len(bgLines) < height {
+		bgLines = append(bgLines, "")
+	}
+
+	fgLines := strings.Split(fg, "\n")
+	fgW := 0
+	for _, l := range fgLines {
+		if w := lipgloss.Width(l); w > fgW {
+			fgW = w
+		}
+	}
+	const topMargin = 1
+	top := regionTop + topMargin
+	left := max((width-fgW)/2, 0)
+
+	for i, line := range fgLines {
+		row := top + i
+		if row >= len(bgLines) {
+			break
+		}
+		bgLine := bgLines[row]
+		bgW := lipgloss.Width(bgLine)
+		if bgW < left {
+			bgLine += strings.Repeat(" ", left-bgW)
+			bgW = left
+		}
+		lead := ansi.Cut(bgLine, 0, left)
+		tail := ansi.Cut(bgLine, left+fgW, max(bgW, left+fgW))
+		bgLines[row] = lead + line + tail
+	}
+
+	return strings.Join(bgLines, "\n")
 }
 
 func (m model) viewResult() string {
@@ -476,4 +622,50 @@ func (m model) viewResult() string {
 	b.WriteString("\n")
 	b.WriteString(styleDim.Render("Press any key to return."))
 	return b.String()
+}
+
+func (m model) viewInstallConfirm() string {
+	var b strings.Builder
+	version := m.versions[m.installPkg]
+
+	b.WriteString(styleBold.Render("Already installed") + "\n\n")
+	b.WriteString(styleCyan.Render(fmt.Sprintf("%s %s is already installed.", m.installPkg, version)) + "\n\n")
+	b.WriteString(styleBold.Render("Reinstall? [y/n]"))
+
+	box := styleModalBox.Width(modalMinWidth).Render(b.String())
+	return m.renderModal(box)
+}
+
+func (m model) viewInstallSelect() string {
+	var b strings.Builder
+
+	pkg := m.cfg.Packages[m.installPkg]
+
+	b.WriteString(styleBold.Render("Install "+m.installPkg) + "\n\n")
+
+	if pkg.Install != nil && len(pkg.Install.Deps) > 0 {
+		b.WriteString(styleDim.Render("Dependencies: ") + strings.Join(pkg.Install.Deps, ", ") + "\n\n")
+	}
+
+	for i, kind := range m.installMgrs {
+		cursor := "  "
+		if i == m.installCursor {
+			cursor = styleCursor.Render("▶ ")
+		}
+
+		label := fmt.Sprintf("%-5s", kind.label())
+		cmdStr := renderInstallCommandPreview(kind, pkg.Install)
+
+		fmt.Fprintf(&b, "%s%s  %s\n",
+			cursor,
+			styleDim.Render(label),
+			cmdStr,
+		)
+	}
+
+	b.WriteString("\n")
+	b.WriteString(styleDim.Render("↑↓/jk navigate · enter install · esc cancel"))
+
+	box := styleModalBoxLeft.Render(b.String())
+	return m.renderModal(box)
 }

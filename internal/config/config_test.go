@@ -540,3 +540,66 @@ func TestLoad_Include_RelativePaths(t *testing.T) {
 		t.Errorf("nvim source = %q, want %q (should be relative to sub dir)", got, want)
 	}
 }
+
+func TestLoadOne_Install_AutoResolveFillsManagerNames(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  nvim:\n    target: ~/.config/nvim\n    install:\n      bin: nvim\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadOne(path)
+	if err != nil {
+		t.Fatalf("loadOne() error: %v", err)
+	}
+	inst := cfg.Packages["nvim"].Install
+	if inst == nil {
+		t.Fatal("expected Install to be set")
+	}
+	if inst.Brew != "nvim" || inst.Apt != "nvim" || inst.Dnf != "nvim" {
+		t.Errorf("expected brew/apt/dnf to default to %q, got brew=%q apt=%q dnf=%q", "nvim", inst.Brew, inst.Apt, inst.Dnf)
+	}
+}
+
+func TestLoadOne_Install_AutoResolveFalseLeavesManagersEmpty(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  secrets:\n    target: ~/.ssh\n    install:\n      bin: age\n      script: https://example.com/install.sh\n      autoResolve: false\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadOne(path)
+	if err != nil {
+		t.Fatalf("loadOne() error: %v", err)
+	}
+	inst := cfg.Packages["secrets"].Install
+	if inst == nil {
+		t.Fatal("expected Install to be set")
+	}
+	if inst.Brew != "" || inst.Apt != "" || inst.Dnf != "" {
+		t.Errorf("expected brew/apt/dnf to stay empty with autoResolve: false, got brew=%q apt=%q dnf=%q", inst.Brew, inst.Apt, inst.Dnf)
+	}
+}
+
+func TestLoadOne_Install_AutoResolveDoesNotOverrideExplicit(t *testing.T) {
+	dir := t.TempDir()
+	yml := "packages:\n  neovim:\n    target: ~/.config/nvim\n    install:\n      brew: neovim-nightly\n"
+	path := filepath.Join(dir, "Knotfile")
+	if err := os.WriteFile(path, []byte(yml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := loadOne(path)
+	if err != nil {
+		t.Fatalf("loadOne() error: %v", err)
+	}
+	inst := cfg.Packages["neovim"].Install
+	if inst.Brew != "neovim-nightly" {
+		t.Errorf("explicit brew value overwritten: got %q, want %q", inst.Brew, "neovim-nightly")
+	}
+	if inst.Apt != "neovim" || inst.Dnf != "neovim" {
+		t.Errorf("expected apt/dnf to still default to package name, got apt=%q dnf=%q", inst.Apt, inst.Dnf)
+	}
+}
