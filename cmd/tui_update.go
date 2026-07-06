@@ -381,9 +381,9 @@ func (m model) buildConfirmLines() []string {
 			continue
 		}
 		if m.toggles[row.name] {
-			lines = append(lines, fmt.Sprintf("  tie   %s", row.name))
+			lines = append(lines, fmt.Sprintf("tie %s", row.name))
 		} else {
-			lines = append(lines, fmt.Sprintf("  untie %s", row.name))
+			lines = append(lines, fmt.Sprintf("untie %s", row.name))
 		}
 	}
 	return lines

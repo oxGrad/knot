@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ── layout helpers ────────────────────────────────────────────────────────────
@@ -501,15 +502,96 @@ func (m model) viewBranch() string {
 	return b.String()
 }
 
+const modalMinWidth = 44
+
+// renderConfirmTable lays out confirmLines ("tie nvim" / "untie zsh") as an
+// invisible 2-column table: action right-aligned, package name left-aligned.
+func renderConfirmTable(lines []string) string {
+	actionWidth := len("untie")
+
+	type row struct{ action, name string }
+	rows := make([]row, 0, len(lines))
+	nameWidth := 0
+	for _, line := range lines {
+		action, name, ok := strings.Cut(line, " ")
+		if !ok {
+			action, name = "", line
+		}
+		rows = append(rows, row{action, name})
+		if len(name) > nameWidth {
+			nameWidth = len(name)
+		}
+	}
+
+	var b strings.Builder
+	for _, r := range rows {
+		fmt.Fprintf(&b, "%s\n", styleCyan.Render(fmt.Sprintf("%*s  %-*s", actionWidth, r.action, nameWidth, r.name)))
+	}
+	return b.String()
+}
+
+var styleModalBox = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(lipgloss.Color("#c084fc")).
+	Align(lipgloss.Center).
+	Padding(1, 3)
+
 func (m model) viewConfirm() string {
 	var b strings.Builder
-	b.WriteString(styleBold.Render("Pending changes:") + "\n")
-	for _, line := range m.confirmLines {
-		b.WriteString(styleCyan.Render(line) + "\n")
-	}
+	b.WriteString(styleBold.Render("Confirm apply") + "\n\n")
+	b.WriteString(renderConfirmTable(m.confirmLines))
 	b.WriteString("\n")
 	b.WriteString(styleBold.Render("Apply? [y/n]"))
-	return b.String()
+
+	box := styleModalBox.Width(modalMinWidth).Render(b.String())
+	bg := styleDim.Render(ansi.Strip(m.backgroundView()))
+	return overlayTop(bg, box, m.width-tuiMarginLeft-tuiMarginRight, m.height, m.listHeaderLines())
+}
+
+// backgroundView renders whatever list/tab view sits behind a modal.
+func (m model) backgroundView() string {
+	if m.activeTab == tabTags {
+		return m.viewTags()
+	}
+	return m.viewList()
+}
+
+// overlayTop composites fg as a box on top of bg, ANSI-safe, horizontally
+// centered and anchored near the top of the region starting at regionTop.
+func overlayTop(bg, fg string, width, height, regionTop int) string {
+	bgLines := strings.Split(bg, "\n")
+	for len(bgLines) < height {
+		bgLines = append(bgLines, "")
+	}
+
+	fgLines := strings.Split(fg, "\n")
+	fgW := 0
+	for _, l := range fgLines {
+		if w := lipgloss.Width(l); w > fgW {
+			fgW = w
+		}
+	}
+	const topMargin = 1
+	top := regionTop + topMargin
+	left := max((width-fgW)/2, 0)
+
+	for i, line := range fgLines {
+		row := top + i
+		if row >= len(bgLines) {
+			break
+		}
+		bgLine := bgLines[row]
+		bgW := lipgloss.Width(bgLine)
+		if bgW < left {
+			bgLine += strings.Repeat(" ", left-bgW)
+			bgW = left
+		}
+		lead := ansi.Cut(bgLine, 0, left)
+		tail := ansi.Cut(bgLine, left+fgW, max(bgW, left+fgW))
+		bgLines[row] = lead + line + tail
+	}
+
+	return strings.Join(bgLines, "\n")
 }
 
 func (m model) viewResult() string {
