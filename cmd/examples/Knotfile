@@ -10,16 +10,28 @@
 packages:
 
   # source defaults to ./nvim when omitted
+  # install: lets `knot install nvim` bootstrap the binary itself
   nvim:
     target: ~/.config/nvim
     tags: [work]
     ignore:
       - "*.log"
       - ".DS_Store"
+    install:
+      bin: nvim                     # binary checked to detect an existing install
+      brew: neovim
+      apt: neovim
+      dnf: neovim
 
   tmux:
     target: ~/.config/tmux
     tags: [work]
+    install:
+      bin: tmux
+      brew: tmux
+      apt: tmux
+      dnf: tmux
+      deps: [git]                   # installed first via the same package manager
 
   # Zsh configuration — explicit source, tagged home
   zsh:
@@ -44,5 +56,9 @@ packages:
       os: linux
 
   # untagged — still usable by name: knot tie secrets
+  # install.script runs when there's no package-manager entry to use
   secrets:
     target: ~/.ssh
+    install:
+      bin: age
+      script: curl -fsSL https://age-encryption.org/install.sh | sh
