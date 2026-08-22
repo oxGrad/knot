@@ -144,8 +144,25 @@ func (m model) renderBrandHeader() string {
 	}
 
 	const gap = 4
-	// left section: 4 spaces + art (37) + gap (4) + mascot (8) + 3 padding = 56
-	const divX = 56
+
+	username := os.Getenv("USER")
+	if username == "" {
+		username = os.Getenv("LOGNAME")
+	}
+	sideLines := [3]string{
+		"Welcome, " + username,
+		"dotfiles manager",
+		dotfilesDir(m.cfgPath),
+	}
+	maxSideW := 0
+	for _, s := range sideLines {
+		if w := lipgloss.Width(s); w > maxSideW {
+			maxSideW = w
+		}
+	}
+
+	// left section: 4 spaces + art (37) + gap (4) + mascot (8) + gap (4) + side text + 3 padding
+	divX := 4 + 37 + gap + 8 + gap + maxSideW + 3
 
 	innerW := max(m.width-tuiMarginLeft-tuiMarginRight, 62) - 2
 	rightW := max(innerW-divX-1, 0)
@@ -167,10 +184,10 @@ func (m model) renderBrandHeader() string {
 		rightRows[i] = strings.Repeat(" ", rightW)
 	}
 	if m.gitBranch != "" {
-		rightRows[4] = fill(" " + styleDim.Render("branch  ") + styleCyan.Render(m.gitBranch))
+		rightRows[1] = fill(" " + styleDim.Render("branch  ") + styleCyan.Render(m.gitBranch))
 	}
 	if m.gitSHA != "" {
-		rightRows[5] = fill(" " + styleDim.Render("commit  ") + styleDim.Render(m.gitSHA))
+		rightRows[2] = fill(" " + styleDim.Render("commit  ") + styleDim.Render(m.gitSHA))
 	}
 	if m.gitCommitMsg != "" {
 		maxMsgLen := max(rightW-len(" message  ")-1, 5)
@@ -178,12 +195,12 @@ func (m model) renderBrandHeader() string {
 		if len(msg) > maxMsgLen {
 			msg = append(msg[:maxMsgLen-1], '…')
 		}
-		rightRows[6] = fill(" " + styleDim.Render("message ") + string(msg))
+		rightRows[3] = fill(" " + styleDim.Render("message ") + string(msg))
 	}
 	if m.phase == phaseGitPull {
 		heartbeat := [3]string{"·", "●", "·"}
 		dot := heartbeat[m.headerFrame%3]
-		rightRows[7] = fill(" " + styleCyan.Render(dot) + " " + styleDim.Render("pulling ") + styleDim.Render(dotfilesDir(m.cfgPath)+"..."))
+		rightRows[4] = fill(" " + styleCyan.Render(dot) + " " + styleDim.Render("pulling ") + styleDim.Render(dotfilesDir(m.cfgPath)+"..."))
 	}
 
 	writeRow := func(left, right string) {
@@ -191,21 +208,25 @@ func (m model) renderBrandHeader() string {
 	}
 
 	writeRow(strings.Repeat(" ", divX), rightRows[0])
-	username := os.Getenv("USER")
-	if username == "" {
-		username = os.Getenv("LOGNAME")
+
+	styledSideLines := [3]string{
+		styleDim.Render("Welcome, ") + username,
+		styleDim.Render("dotfiles manager"),
+		styleDim.Render(sideLines[2]),
 	}
-	welcomeLeft := "    " + styleDim.Render("Welcome, ") + username + "!"
-	welcomeLeft += strings.Repeat(" ", max(divX-lipgloss.Width(welcomeLeft), 0))
-	writeRow(welcomeLeft, rightRows[1])
-	writeRow(strings.Repeat(" ", divX), rightRows[2])
+
 	for i := 0; i < 6; i++ {
 		art := styleArt[i].Render(knotArt[i])
 		mascot := renderMascotLine(mascotLines[i], mascotStyle)
 		leftContent := "    " + art + strings.Repeat(" ", gap) + mascot
+		if i < 3 {
+			leftContent += strings.Repeat(" ", gap) + styledSideLines[i]
+		}
 		leftContent += strings.Repeat(" ", max(divX-lipgloss.Width(leftContent), 0))
-		writeRow(leftContent, rightRows[3+i])
+		writeRow(leftContent, rightRows[i+1])
 	}
+	writeRow(strings.Repeat(" ", divX), rightRows[7])
+	writeRow(strings.Repeat(" ", divX), rightRows[8])
 	writeRow(strings.Repeat(" ", divX), rightRows[9])
 	writeRow(strings.Repeat(" ", divX), rightRows[10])
 
