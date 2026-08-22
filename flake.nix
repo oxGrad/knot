@@ -29,7 +29,7 @@
           # Cross-compile to linux/amd64 regardless of host (needed for containers)
           crossPkgs = pkgs.pkgsCross.gnu64;
 
-          knotBin = crossPkgs.buildGoModule {
+          mkKnot = buildPkgs: buildPkgs.buildGoModule {
             pname = "knot";
             version = "0.1.0";
             src = pkgs.lib.cleanSource self;
@@ -42,6 +42,12 @@
             '';
             meta = { mainProgram = "knot"; };
           };
+
+          # Native build for the host system — this is what `nix run`/`nix profile
+          # install` should hand people, so it must actually run on their machine.
+          knotBin = mkKnot pkgs;
+          # linux/amd64 build used only to populate the container images below.
+          knotLinuxBin = mkKnot crossPkgs;
 
           pullBase = { imageName, imageDigest, sha256, tag }:
             pkgs.dockerTools.pullImage {
@@ -82,7 +88,7 @@
               };
               extraCommands = ''
                 mkdir -p usr/local/bin
-                cp ${knotBin}/bin/knot usr/local/bin/knot
+                cp ${knotLinuxBin}/bin/knot usr/local/bin/knot
                 chmod 755 usr/local/bin/knot
               '';
             };

@@ -48,6 +48,19 @@ sudo mv knot /usr/local/bin/
 go install github.com/oxgrad/knot@latest
 ```
 
+### Nix
+
+```bash
+# run without installing
+nix run github:oxGrad/knot
+
+# install into your profile
+nix profile install github:oxGrad/knot
+```
+
+Builds natively for your host system via the flake in this repo (Linux and
+macOS, Intel + Apple Silicon).
+
 ## ⚙️ Configuration (`Knotfile`)
 
 Create a file named exactly `Knotfile` (no extension) at the root of your dotfiles repository.
